@@ -1,0 +1,124 @@
+case_id,activity_name,timestamp,resource,team,priority,status
+T001,Ticket Created,2024-02-01 08:12:00,Portal,L1 Support,medium,open
+T001,Assigned,2024-02-01 08:20:00,Alice,L1 Support,medium,assigned
+T001,Under Investigation,2024-02-01 09:00:00,Alice,L1 Support,medium,in_progress
+T001,Resolved,2024-02-01 11:30:00,Alice,L1 Support,medium,resolved
+T001,Closed,2024-02-01 15:00:00,System,L1 Support,medium,closed
+T002,Ticket Created,2024-02-01 09:05:00,Portal,L1 Support,high,open
+T002,Assigned,2024-02-01 09:10:00,Bob,L1 Support,high,assigned
+T002,Under Investigation,2024-02-01 09:30:00,Bob,L1 Support,high,in_progress
+T002,Escalated to L2,2024-02-01 11:00:00,Bob,L2 Support,high,escalated
+T002,Under Investigation,2024-02-01 11:30:00,Carol,L2 Support,high,in_progress
+T002,Resolved,2024-02-01 14:45:00,Carol,L2 Support,high,resolved
+T002,Closed,2024-02-02 09:00:00,System,L2 Support,high,closed
+T003,Ticket Created,2024-02-02 10:15:00,Email,L1 Support,low,open
+T003,Assigned,2024-02-02 10:30:00,Alice,L1 Support,low,assigned
+T003,Under Investigation,2024-02-02 11:00:00,Alice,L1 Support,low,in_progress
+T003,Resolved,2024-02-02 12:00:00,Alice,L1 Support,low,resolved
+T003,Closed,2024-02-02 17:00:00,System,L1 Support,low,closed
+T004,Ticket Created,2024-02-05 08:45:00,Portal,L1 Support,critical,open
+T004,Assigned,2024-02-05 08:50:00,Bob,L1 Support,critical,assigned
+T004,Under Investigation,2024-02-05 09:00:00,Bob,L1 Support,critical,in_progress
+T004,Escalated to L2,2024-02-05 09:30:00,Bob,L2 Support,critical,escalated
+T004,Under Investigation,2024-02-05 09:45:00,Dave,L2 Support,critical,in_progress
+T004,Escalated to L3,2024-02-05 10:30:00,Dave,L3 Support,critical,escalated
+T004,Under Investigation,2024-02-05 11:00:00,Eve,L3 Support,critical,in_progress
+T004,Resolved,2024-02-05 13:15:00,Eve,L3 Support,critical,resolved
+T004,Closed,2024-02-06 09:00:00,System,L3 Support,critical,closed
+T005,Ticket Created,2024-02-05 13:00:00,Portal,L1 Support,medium,open
+T005,Assigned,2024-02-05 13:10:00,Alice,L1 Support,medium,assigned
+T005,Under Investigation,2024-02-05 14:00:00,Alice,L1 Support,medium,in_progress
+T005,Resolved,2024-02-05 15:30:00,Alice,L1 Support,medium,resolved
+T005,Closed,2024-02-06 09:00:00,System,L1 Support,medium,closed
+T006,Ticket Created,2024-02-06 09:00:00,Phone,L1 Support,high,open
+T006,Assigned,2024-02-06 09:15:00,Bob,L1 Support,high,assigned
+T006,Under Investigation,2024-02-06 09:30:00,Bob,L1 Support,high,in_progress
+T006,Escalated to L2,2024-02-06 10:30:00,Bob,L2 Support,high,escalated
+T006,Under Investigation,2024-02-06 11:00:00,Carol,L2 Support,high,in_progress
+T006,Resolved,2024-02-06 13:00:00,Carol,L2 Support,high,resolved
+T006,Closed,2024-02-07 09:00:00,System,L2 Support,high,closed
+T007,Ticket Created,2024-02-07 10:00:00,Portal,L1 Support,low,open
+T007,Assigned,2024-02-07 10:15:00,Alice,L1 Support,low,assigned
+T007,Under Investigation,2024-02-07 10:45:00,Alice,L1 Support,low,in_progress
+T007,Resolved,2024-02-07 11:30:00,Alice,L1 Support,low,resolved
+T007,Closed,2024-02-07 17:00:00,System,L1 Support,low,closed
+T008,Ticket Created,2024-02-08 08:30:00,Email,L1 Support,medium,open
+T008,Assigned,2024-02-08 08:45:00,Bob,L1 Support,medium,assigned
+T008,Under Investigation,2024-02-08 09:15:00,Bob,L1 Support,medium,in_progress
+T008,Resolved,2024-02-08 11:00:00,Bob,L1 Support,medium,resolved
+T008,Closed,2024-02-08 16:00:00,System,L1 Support,medium,closed
+T008,Ticket Created,2024-02-09 09:00:00,Email,L1 Support,medium,open
+T008,Assigned,2024-02-09 09:10:00,Alice,L1 Support,medium,assigned
+T008,Under Investigation,2024-02-09 09:30:00,Alice,L1 Support,medium,in_progress
+T008,Resolved,2024-02-09 10:15:00,Alice,L1 Support,medium,resolved
+T008,Closed,2024-02-09 17:00:00,System,L1 Support,medium,closed
+T009,Ticket Created,2024-02-12 11:00:00,Portal,L1 Support,high,open
+T009,Assigned,2024-02-12 11:10:00,Dave,L1 Support,high,assigned
+T009,Under Investigation,2024-02-12 11:30:00,Dave,L1 Support,high,in_progress
+T009,Escalated to L2,2024-02-12 12:30:00,Dave,L2 Support,high,escalated
+T009,Under Investigation,2024-02-12 13:00:00,Carol,L2 Support,high,in_progress
+T009,Resolved,2024-02-12 15:30:00,Carol,L2 Support,high,resolved
+T009,Closed,2024-02-13 09:00:00,System,L2 Support,high,closed
+T010,Ticket Created,2024-02-13 09:30:00,Portal,L1 Support,medium,open
+T010,Assigned,2024-02-13 09:40:00,Alice,L1 Support,medium,assigned
+T010,Under Investigation,2024-02-13 10:00:00,Alice,L1 Support,medium,in_progress
+T010,Resolved,2024-02-13 12:00:00,Alice,L1 Support,medium,resolved
+T010,Closed,2024-02-13 17:00:00,System,L1 Support,medium,closed
+T011,Ticket Created,2024-02-14 08:00:00,Phone,L1 Support,critical,open
+T011,Assigned,2024-02-14 08:05:00,Bob,L1 Support,critical,assigned
+T011,Under Investigation,2024-02-14 08:15:00,Bob,L1 Support,critical,in_progress
+T011,Escalated to L2,2024-02-14 09:00:00,Bob,L2 Support,critical,escalated
+T011,Under Investigation,2024-02-14 09:15:00,Eve,L2 Support,critical,in_progress
+T011,Escalated to L3,2024-02-14 10:00:00,Eve,L3 Support,critical,escalated
+T011,Under Investigation,2024-02-14 10:20:00,Dave,L3 Support,critical,in_progress
+T011,Resolved,2024-02-14 12:00:00,Dave,L3 Support,critical,resolved
+T011,Closed,2024-02-15 09:00:00,System,L3 Support,critical,closed
+T012,Ticket Created,2024-02-15 10:00:00,Portal,L1 Support,low,open
+T012,Assigned,2024-02-15 10:20:00,Alice,L1 Support,low,assigned
+T012,Under Investigation,2024-02-15 11:00:00,Alice,L1 Support,low,in_progress
+T012,Resolved,2024-02-15 12:30:00,Alice,L1 Support,low,resolved
+T012,Closed,2024-02-15 17:00:00,System,L1 Support,low,closed
+T013,Ticket Created,2024-02-19 09:00:00,Email,L1 Support,medium,open
+T013,Assigned,2024-02-19 09:15:00,Bob,L1 Support,medium,assigned
+T013,Under Investigation,2024-02-19 09:45:00,Bob,L1 Support,medium,in_progress
+T013,Resolved,2024-02-19 11:00:00,Bob,L1 Support,medium,resolved
+T013,Closed,2024-02-19 17:00:00,System,L1 Support,medium,closed
+T014,Ticket Created,2024-02-20 14:00:00,Portal,L1 Support,high,open
+T014,Assigned,2024-02-20 14:10:00,Carol,L2 Support,high,assigned
+T014,Under Investigation,2024-02-20 14:30:00,Carol,L2 Support,high,in_progress
+T014,Resolved,2024-02-20 16:00:00,Carol,L2 Support,high,resolved
+T014,Closed,2024-02-21 09:00:00,System,L2 Support,high,closed
+T015,Ticket Created,2024-02-21 08:00:00,Portal,L1 Support,medium,open
+T015,Assigned,2024-02-21 08:10:00,Alice,L1 Support,medium,assigned
+T015,Under Investigation,2024-02-21 08:40:00,Alice,L1 Support,medium,in_progress
+T015,Resolved,2024-02-21 10:00:00,Alice,L1 Support,medium,resolved
+T015,Closed,2024-02-21 17:00:00,System,L1 Support,medium,closed
+T016,Ticket Created,2024-02-22 10:00:00,Phone,L1 Support,low,open
+T016,Assigned,2024-02-22 10:15:00,Bob,L1 Support,low,assigned
+T016,Under Investigation,2024-02-22 10:45:00,Bob,L1 Support,low,in_progress
+T016,Resolved,2024-02-22 12:00:00,Bob,L1 Support,low,resolved
+T016,Closed,2024-02-22 17:00:00,System,L1 Support,low,closed
+T017,Ticket Created,2024-02-26 09:30:00,Email,L1 Support,medium,open
+T017,Assigned,2024-02-26 09:45:00,Dave,L1 Support,medium,assigned
+T017,Under Investigation,2024-02-26 10:15:00,Dave,L1 Support,medium,in_progress
+T017,Escalated to L2,2024-02-26 11:30:00,Dave,L2 Support,medium,escalated
+T017,Under Investigation,2024-02-26 12:00:00,Carol,L2 Support,medium,in_progress
+T017,Resolved,2024-02-26 14:00:00,Carol,L2 Support,medium,resolved
+T017,Closed,2024-02-27 09:00:00,System,L2 Support,medium,closed
+T018,Ticket Created,2024-02-27 08:15:00,Portal,L1 Support,high,open
+T018,Assigned,2024-02-27 08:25:00,Alice,L1 Support,high,assigned
+T018,Under Investigation,2024-02-27 09:00:00,Alice,L1 Support,high,in_progress
+T018,Resolved,2024-02-27 10:30:00,Alice,L1 Support,high,resolved
+T018,Closed,2024-02-27 17:00:00,System,L1 Support,high,closed
+T019,Ticket Created,2024-02-28 11:00:00,Portal,L1 Support,medium,open
+T019,Assigned,2024-02-28 11:15:00,Bob,L1 Support,medium,assigned
+T019,Under Investigation,2024-02-28 11:45:00,Bob,L1 Support,medium,in_progress
+T019,Resolved,2024-02-28 13:30:00,Bob,L1 Support,medium,resolved
+T019,Closed,2024-02-28 17:00:00,System,L1 Support,medium,closed
+T020,Ticket Created,2024-03-01 09:00:00,Phone,L1 Support,critical,open
+T020,Assigned,2024-03-01 09:05:00,Carol,L2 Support,critical,assigned
+T020,Under Investigation,2024-03-01 09:15:00,Carol,L2 Support,critical,in_progress
+T020,Escalated to L3,2024-03-01 10:00:00,Carol,L3 Support,critical,escalated
+T020,Under Investigation,2024-03-01 10:15:00,Eve,L3 Support,critical,in_progress
+T020,Resolved,2024-03-01 12:30:00,Eve,L3 Support,critical,resolved
+T020,Closed,2024-03-04 09:00:00,System,L3 Support,critical,closed

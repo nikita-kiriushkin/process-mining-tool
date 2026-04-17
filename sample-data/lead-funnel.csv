@@ -1,0 +1,129 @@
+case_id,activity_name,timestamp,resource,region,status
+C001,Lead Created,2024-01-02 09:15:00,Alice,EMEA,new
+C001,Email Sent,2024-01-02 10:00:00,Alice,EMEA,contacted
+C001,Call Scheduled,2024-01-03 09:30:00,Alice,EMEA,contacted
+C001,Call Completed,2024-01-04 14:00:00,Alice,EMEA,qualified
+C001,Proposal Sent,2024-01-08 11:00:00,Bob,EMEA,proposal
+C001,Contract Signed,2024-01-15 16:00:00,Bob,EMEA,won
+C002,Lead Created,2024-01-03 10:00:00,Charlie,NA,new
+C002,Email Sent,2024-01-03 10:30:00,Charlie,NA,contacted
+C002,Call Scheduled,2024-01-05 09:00:00,Charlie,NA,contacted
+C002,Call No Show,2024-01-05 09:00:00,Charlie,NA,contacted
+C002,Call Scheduled,2024-01-08 10:00:00,Charlie,NA,contacted
+C002,Call Completed,2024-01-08 10:00:00,Charlie,NA,qualified
+C002,Demo Scheduled,2024-01-10 14:00:00,Charlie,NA,demo
+C002,Demo Completed,2024-01-12 14:00:00,Charlie,NA,demo
+C002,Proposal Sent,2024-01-15 09:00:00,Diana,NA,proposal
+C002,Negotiation,2024-01-18 11:00:00,Diana,NA,negotiation
+C002,Contract Signed,2024-01-25 17:00:00,Diana,NA,won
+C003,Lead Created,2024-01-04 08:45:00,Alice,EMEA,new
+C003,Email Sent,2024-01-04 09:00:00,Alice,EMEA,contacted
+C003,Lead Lost,2024-01-10 12:00:00,Alice,EMEA,lost
+C004,Lead Created,2024-01-05 11:00:00,Bob,APAC,new
+C004,Call Scheduled,2024-01-06 09:00:00,Bob,APAC,contacted
+C004,Call Completed,2024-01-07 09:00:00,Bob,APAC,qualified
+C004,Proposal Sent,2024-01-09 14:00:00,Bob,APAC,proposal
+C004,Lead Lost,2024-01-17 09:00:00,Bob,APAC,lost
+C005,Lead Created,2024-01-06 09:00:00,Charlie,NA,new
+C005,Email Sent,2024-01-06 09:30:00,Charlie,NA,contacted
+C005,Call Scheduled,2024-01-08 14:00:00,Charlie,NA,contacted
+C005,Call Completed,2024-01-08 14:00:00,Charlie,NA,qualified
+C005,Proposal Sent,2024-01-11 10:00:00,Charlie,NA,proposal
+C005,Contract Signed,2024-01-20 15:00:00,Charlie,NA,won
+C006,Lead Created,2024-01-08 10:00:00,Diana,EMEA,new
+C006,Email Sent,2024-01-08 10:30:00,Diana,EMEA,contacted
+C006,Call Scheduled,2024-01-10 09:00:00,Diana,EMEA,contacted
+C006,Call Completed,2024-01-10 09:00:00,Diana,EMEA,qualified
+C006,Demo Scheduled,2024-01-13 11:00:00,Diana,EMEA,demo
+C006,Demo Completed,2024-01-14 11:00:00,Diana,EMEA,demo
+C006,Proposal Sent,2024-01-17 09:00:00,Diana,EMEA,proposal
+C006,Contract Signed,2024-01-24 14:00:00,Diana,EMEA,won
+C007,Lead Created,2024-01-09 09:00:00,Alice,NA,new
+C007,Email Sent,2024-01-09 09:30:00,Alice,NA,contacted
+C007,Call Scheduled,2024-01-11 10:00:00,Alice,NA,contacted
+C007,Call No Show,2024-01-11 10:00:00,Alice,NA,contacted
+C007,Lead Lost,2024-01-18 09:00:00,Alice,NA,lost
+C008,Lead Created,2024-01-10 14:00:00,Bob,APAC,new
+C008,Email Sent,2024-01-10 14:30:00,Bob,APAC,contacted
+C008,Call Scheduled,2024-01-12 09:00:00,Bob,APAC,contacted
+C008,Call Completed,2024-01-12 09:00:00,Bob,APAC,qualified
+C008,Proposal Sent,2024-01-15 11:00:00,Bob,APAC,proposal
+C008,Negotiation,2024-01-19 10:00:00,Bob,APAC,negotiation
+C008,Contract Signed,2024-01-26 16:00:00,Bob,APAC,won
+C009,Lead Created,2024-01-11 09:30:00,Charlie,EMEA,new
+C009,Email Sent,2024-01-11 10:00:00,Charlie,EMEA,contacted
+C009,Call Scheduled,2024-01-13 09:00:00,Charlie,EMEA,contacted
+C009,Call Completed,2024-01-13 09:00:00,Charlie,EMEA,qualified
+C009,Proposal Sent,2024-01-16 14:00:00,Charlie,EMEA,proposal
+C009,Lead Lost,2024-01-23 09:00:00,Charlie,EMEA,lost
+C010,Lead Created,2024-01-12 10:00:00,Diana,NA,new
+C010,Call Scheduled,2024-01-14 09:00:00,Diana,NA,contacted
+C010,Call Completed,2024-01-14 09:00:00,Diana,NA,qualified
+C010,Demo Scheduled,2024-01-16 14:00:00,Diana,NA,demo
+C010,Demo Completed,2024-01-17 14:00:00,Diana,NA,demo
+C010,Proposal Sent,2024-01-20 10:00:00,Diana,NA,proposal
+C010,Negotiation,2024-01-24 11:00:00,Diana,NA,negotiation
+C010,Contract Signed,2024-01-31 17:00:00,Diana,NA,won
+C011,Lead Created,2024-01-15 09:00:00,Alice,APAC,new
+C011,Email Sent,2024-01-15 09:30:00,Alice,APAC,contacted
+C011,Call Scheduled,2024-01-17 10:00:00,Alice,APAC,contacted
+C011,Call Completed,2024-01-17 10:00:00,Alice,APAC,qualified
+C011,Proposal Sent,2024-01-21 11:00:00,Alice,APAC,proposal
+C011,Contract Signed,2024-01-29 14:00:00,Alice,APAC,won
+C012,Lead Created,2024-01-16 11:00:00,Bob,EMEA,new
+C012,Email Sent,2024-01-16 11:30:00,Bob,EMEA,contacted
+C012,Lead Lost,2024-01-22 09:00:00,Bob,EMEA,lost
+C013,Lead Created,2024-01-17 09:00:00,Charlie,NA,new
+C013,Email Sent,2024-01-17 09:30:00,Charlie,NA,contacted
+C013,Call Scheduled,2024-01-19 10:00:00,Charlie,NA,contacted
+C013,Call No Show,2024-01-19 10:00:00,Charlie,NA,contacted
+C013,Call Scheduled,2024-01-22 10:00:00,Charlie,NA,contacted
+C013,Call Completed,2024-01-22 10:00:00,Charlie,NA,qualified
+C013,Proposal Sent,2024-01-25 14:00:00,Charlie,NA,proposal
+C013,Negotiation,2024-01-29 11:00:00,Charlie,NA,negotiation
+C013,Contract Signed,2024-02-05 16:00:00,Charlie,NA,won
+C014,Lead Created,2024-01-18 10:00:00,Diana,APAC,new
+C014,Email Sent,2024-01-18 10:30:00,Diana,APAC,contacted
+C014,Call Scheduled,2024-01-20 09:00:00,Diana,APAC,contacted
+C014,Call Completed,2024-01-20 09:00:00,Diana,APAC,qualified
+C014,Demo Scheduled,2024-01-23 14:00:00,Diana,APAC,demo
+C014,Demo Completed,2024-01-24 14:00:00,Diana,APAC,demo
+C014,Proposal Sent,2024-01-27 10:00:00,Alice,APAC,proposal
+C014,Contract Signed,2024-02-02 15:00:00,Alice,APAC,won
+C015,Lead Created,2024-01-20 09:30:00,Bob,NA,new
+C015,Email Sent,2024-01-20 10:00:00,Bob,NA,contacted
+C015,Call Scheduled,2024-01-22 09:00:00,Bob,NA,contacted
+C015,Call Completed,2024-01-22 09:00:00,Bob,NA,qualified
+C015,Proposal Sent,2024-01-25 11:00:00,Bob,NA,proposal
+C015,Lead Lost,2024-02-01 09:00:00,Bob,NA,lost
+C016,Lead Created,2024-01-22 10:00:00,Alice,EMEA,new
+C016,Email Sent,2024-01-22 10:30:00,Alice,EMEA,contacted
+C016,Call Scheduled,2024-01-24 09:00:00,Alice,EMEA,contacted
+C016,Call Completed,2024-01-24 09:00:00,Alice,EMEA,qualified
+C016,Proposal Sent,2024-01-27 14:00:00,Alice,EMEA,proposal
+C016,Negotiation,2024-01-31 10:00:00,Alice,EMEA,negotiation
+C016,Contract Signed,2024-02-07 16:00:00,Alice,EMEA,won
+C017,Lead Created,2024-01-24 09:00:00,Charlie,APAC,new
+C017,Lead Lost,2024-01-28 12:00:00,Charlie,APAC,lost
+C018,Lead Created,2024-01-25 10:00:00,Diana,NA,new
+C018,Email Sent,2024-01-25 10:30:00,Diana,NA,contacted
+C018,Call Scheduled,2024-01-27 09:00:00,Diana,NA,contacted
+C018,Call Completed,2024-01-27 09:00:00,Diana,NA,qualified
+C018,Demo Scheduled,2024-01-30 14:00:00,Diana,NA,demo
+C018,Demo Completed,2024-01-31 14:00:00,Diana,NA,demo
+C018,Proposal Sent,2024-02-03 10:00:00,Diana,NA,proposal
+C018,Negotiation,2024-02-07 11:00:00,Diana,NA,negotiation
+C018,Contract Signed,2024-02-14 17:00:00,Diana,NA,won
+C019,Lead Created,2024-01-26 09:00:00,Alice,EMEA,new
+C019,Email Sent,2024-01-26 09:30:00,Alice,EMEA,contacted
+C019,Call Scheduled,2024-01-28 10:00:00,Alice,EMEA,contacted
+C019,Call Completed,2024-01-28 10:00:00,Alice,EMEA,qualified
+C019,Proposal Sent,2024-01-31 11:00:00,Bob,EMEA,proposal
+C019,Contract Signed,2024-02-07 15:00:00,Bob,EMEA,won
+C020,Lead Created,2024-01-28 10:00:00,Charlie,NA,new
+C020,Email Sent,2024-01-28 10:30:00,Charlie,NA,contacted
+C020,Call Scheduled,2024-01-30 09:00:00,Charlie,NA,contacted
+C020,Call No Show,2024-01-30 09:00:00,Charlie,NA,contacted
+C020,Call Scheduled,2024-02-02 10:00:00,Charlie,NA,contacted
+C020,Call No Show,2024-02-02 10:00:00,Charlie,NA,contacted
+C020,Lead Lost,2024-02-09 09:00:00,Charlie,NA,lost

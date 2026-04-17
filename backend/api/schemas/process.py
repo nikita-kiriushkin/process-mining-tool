@@ -1,0 +1,78 @@
+from pydantic import BaseModel
+
+
+class ColumnMapping(BaseModel):
+    case_id: str
+    activity_name: str
+    timestamp: str
+    resource: str | None = None
+    team: str | None = None
+    region: str | None = None
+    status: str | None = None
+    cost: str | None = None
+
+
+class ProcessFilters(BaseModel):
+    date_from: str | None = None
+    date_to: str | None = None
+    include_activities: list[str] | None = None
+    exclude_activities: list[str] | None = None
+    min_edge_frequency: int | None = None
+    variant_ids: list[int] | None = None
+    dimension_filters: dict[str, list[str]] | None = None
+
+
+class ProcessRequest(BaseModel):
+    session_id: str
+    column_mapping: ColumnMapping
+    filters: ProcessFilters = ProcessFilters()
+
+
+class GraphNode(BaseModel):
+    id: str
+    label: str
+    count: int
+    avg_duration_before_ms: float | None = None
+    avg_position: float
+    is_start: bool
+    is_end: bool
+
+
+class GraphEdge(BaseModel):
+    id: str
+    source: str
+    target: str
+    count: int
+    avg_duration_ms: float | None = None
+    frequency_ratio: float
+
+
+class ProcessGraph(BaseModel):
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+
+
+class ProcessVariant(BaseModel):
+    variant_id: int
+    activities: list[str]
+    count: int
+    frequency_ratio: float
+    avg_duration_ms: float | None = None
+
+
+class SummaryMetrics(BaseModel):
+    total_cases: int
+    total_events: int
+    avg_case_length: float
+    most_frequent_start: str
+    most_frequent_end: str
+    date_min: str
+    date_max: str
+
+
+class ProcessResponse(BaseModel):
+    graph: ProcessGraph
+    variants: list[ProcessVariant]
+    summary: SummaryMetrics
+    available_activities: list[str]
+    available_dimensions: dict[str, list[str]]
