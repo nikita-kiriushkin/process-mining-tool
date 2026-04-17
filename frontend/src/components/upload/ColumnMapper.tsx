@@ -36,42 +36,13 @@ const OPTIONAL_FIELDS: Array<{
   { key: "cost", label: "Cost", hint: "Numeric cost or value metric" },
 ];
 
-const ALIASES: Record<keyof ColumnMapping, string[]> = {
-  case_id: ["case_id", "caseid", "case", "id", "case_no", "process_id", "trace_id", "instance_id"],
-  activity_name: ["activity_name", "activity", "event", "event_name", "task", "step", "action", "concept:name"],
-  timestamp: ["timestamp", "time", "date", "datetime", "start_time", "event_time", "ts", "created_at", "time:timestamp"],
-  resource: ["resource", "user", "agent", "owner", "assigned_to", "performer", "org:resource"],
-  team: ["team", "group", "department", "dept"],
-  region: ["region", "country", "location", "area", "market", "territory"],
-  status: ["status", "state", "result", "outcome", "stage"],
-  cost: ["cost", "amount", "price", "value", "fee", "revenue"],
-};
 
 function autoDetect(columns: string[]): Partial<ColumnMapping> {
-  const mapping: Partial<ColumnMapping> = {};
-  const lower = columns.map((c) => c.toLowerCase().trim());
-
-  for (const [canonical, aliases] of Object.entries(ALIASES) as [keyof ColumnMapping, string[]][]) {
-    // Exact match first
-    for (const alias of aliases) {
-      const idx = lower.findIndex((c) => c === alias);
-      if (idx !== -1) {
-        mapping[canonical] = columns[idx];
-        break;
-      }
-    }
-    // Substring match fallback
-    if (!mapping[canonical]) {
-      for (const alias of aliases) {
-        const idx = lower.findIndex((c) => c.includes(alias));
-        if (idx !== -1) {
-          mapping[canonical] = columns[idx];
-          break;
-        }
-      }
-    }
-  }
-  return mapping;
+  return {
+    case_id: columns[0],
+    activity_name: columns[1],
+    timestamp: columns[2],
+  };
 }
 
 export function ColumnMapper({

@@ -127,16 +127,18 @@ backend/
   core/parser.py                   CSV parsing + validation
   core/miner.py                    DFG construction + metrics
   core/variants.py                 Variant extraction
-  core/filters.py                  Filter application (date, activity, dimension, variant)
+  core/filters.py                  Filter application (case_id, date, activity, dimension, variant)
   tests/                           17 passing tests
 
 frontend/src/
   app/upload/page.tsx              Upload wizard page
   app/map/page.tsx                 Column mapping page
-  app/explore/page.tsx             Explorer: FilterPanel, graph, DetailPanel, VariantsTable, dark mode
-  components/graph/ProcessGraph.tsx  Cytoscape graph — dynamic stylesheet, happy path, loop edges, dark mode
+  app/explore/page.tsx             Explorer: FilterPanel (with ResizeHandle, collapsible FilterSection,
+                                   case ID filter), graph, DetailPanel (edge case IDs + copy), VariantsTable
+  components/graph/ProcessGraph.tsx  Cytoscape graph — edge curvature drag, dynamic stylesheet, happy path,
+                                   loop edges, dark mode
   components/upload/FileDropzone.tsx Drag-drop upload
-  components/upload/ColumnMapper.tsx Column mapping form
+  components/upload/ColumnMapper.tsx Column mapping — positional defaults (col[0]=case_id, col[1]=activity, col[2]=timestamp)
   components/upload/StepIndicator.tsx Wizard step progress
   components/ui/Button.tsx         Reusable button
   lib/types.ts                     Shared TypeScript types (API contract)
@@ -166,6 +168,52 @@ cd backend && pytest tests/ -v
 
 Frontend: http://localhost:3000  
 Backend API docs: http://localhost:8000/docs
+
+---
+
+### Step 11 — Edge case IDs + copy ✅ (branch BIBKPLY-2168)
+- `GraphEdge` schema (`backend/api/schemas/process.py`) gains `case_ids: list[str] = []`
+- `miner.py` — after grouping edge pairs, collects unique `case_id` values per group (`sorted(x.unique().tolist())`), merges into `edges_df`, passes to each `GraphEdge`
+- Frontend `GraphEdge` type (`lib/types.ts`) gains `case_ids: string[]`
+- `EdgeDetail` (`explore/page.tsx`) shows first 5 case IDs in a monospaced list under **"Case IDs (N)"** header; "Copy all" button writes all IDs newline-separated to clipboard, briefly shows "Copied!"
+
+### Step 12 — Edge curvature drag ✅ (branch BIBKPLY-2168)
+- `ProcessGraph.tsx` — edges (non-loop) can be dragged to bend their curvature
+- `edgeCurvaturesRef` (ref, no re-renders) stores current curvature per edge ID
+- `dragRef` stores active drag state: edge ID, start rendered position, start curvature, pre-computed perpendicular unit vector of the edge direction
+- `loopEdgeIdsRef` mirrors the `loopEdgeIds` prop so Cytoscape event handlers don't go stale
+- On edge `mousedown`: records drag state, disables Cytoscape panning, sets cursor to `grabbing`
+- Document-level `mousemove`: projects mouse delta onto the edge perpendicular, converts rendered px → model coords (`/ cy.zoom()`), applies `curve-style: unbundled-bezier` + `control-point-distances` inline on the edge
+- Document-level `mouseup`: clears drag state, re-enables panning, resets cursor
+- Edge `dblclick`: resets curvature (`edge.removeStyle('curve-style control-point-distances')`)
+- Cursor shows `grab` on hover over draggable edges
+
+### Step 13 — Resizable panels ✅ (branch BIBKPLY-2168)
+- `ResizeHandle` component added to `explore/page.tsx` — thin strip (4 px), turns blue on hover, exposes `direction: "vertical" | "horizontal"` and `onDelta: (delta: number) => void`
+- Uses document-level `mousemove`/`mouseup` with incremental delta (not absolute) for smooth tracking even when pointer leaves the strip
+- Filter panel width: state `filterWidth` (default 256, min 160, max 400), `onDelta={(d) => setFilterWidth(w => clamp(w + d, ...))}`, handle between left aside and main
+- Detail panel width: state `detailWidth` (default 288, min 200, max 500), `onDelta={(d) => setDetailWidth(w => clamp(w - d, ...))}` (negated — handle is on the LEFT of the right panel)
+- Variants table height: state `variantsHeight` (default 192, min 80, max 400), `onDelta={(d) => setVariantsHeight(h => clamp(h - d, ...))}` (negated — handle is the TOP border of the bottom section, drag up = taller)
+- Panel borders removed; `ResizeHandle` serves as the visual separator
+
+### Step 14 — Collapsible filter sections ✅ (branch BIBKPLY-2168)
+- `FilterSection` in `explore/page.tsx` now owns a `useState(true)` open/closed toggle
+- Title row is a `<button>` with a `ChevronDown` icon (rotates −90° when collapsed)
+- Children are conditionally rendered; each section collapses independently
+
+### Step 15 — Case ID filter ✅ (branch BIBKPLY-2168)
+- `ProcessFilters` schema (`backend/api/schemas/process.py`) gains `case_ids: list[str] | None = None`
+- `filters.py` — applied **first** (before date range, activity, dimension, variant filters) as the most selective case-level filter: `df = df[df["case_id"].isin(filters.case_ids)]`
+- Frontend `ProcessFilters` type (`lib/types.ts`) gains `case_ids?: string[]`
+- New "Case IDs" `FilterSection` at the **top** of the filter panel — `<textarea>` (3 rows, monospace), parses IDs split on newlines/spaces/commas, deduplicates
+- Commits to store on blur (avoids rapid re-fetches while typing)
+- Shows "N cases selected" counter below the textarea while input is non-empty
+- `hasActive` and `handleReset` updated to include case_ids
+
+### Step 16 — Positional column mapping defaults ✅ (branch BIBKPLY-2168)
+- `ColumnMapper.tsx` — `autoDetect` replaced from alias-based matching to positional: column[0] → `case_id`, column[1] → `activity_name`, column[2] → `timestamp`; all optional fields left unmapped
+- `ALIASES` constant removed (no longer used)
+- Alias detection was heuristic and often wrong for arbitrary CSVs; positional default is more predictable
 
 ---
 

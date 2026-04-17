@@ -39,6 +39,7 @@ export interface GraphEdge {
   count: number;
   avg_duration_ms: number | null;
   frequency_ratio: number;
+  case_ids: string[];
 }
 
 export interface ProcessGraph {
@@ -78,6 +79,7 @@ export interface ProcessFilters {
   min_edge_frequency?: number;
   variant_ids?: number[];
   dimension_filters?: Record<string, string[]>;
+  case_ids?: string[];
 }
 
 // ── Process response ──────────────────────────────────────────────────────────

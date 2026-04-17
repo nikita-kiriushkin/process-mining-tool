@@ -21,6 +21,10 @@ def apply_filters(df: pd.DataFrame, filters: ProcessFilters, mapping: ColumnMapp
     if df.empty:
         return df
 
+    # ── Case ID filter ────────────────────────────────────────────────────────
+    if filters.case_ids:
+        df = df[df["case_id"].isin(filters.case_ids)]
+
     # ── Date range filter ─────────────────────────────────────────────────────
     # Filter based on the *first* event timestamp of each case
     if filters.date_from or filters.date_to:
