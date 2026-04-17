@@ -20,6 +20,7 @@ class ProcessFilters(BaseModel):
     min_edge_frequency: int | None = None
     variant_ids: list[int] | None = None
     dimension_filters: dict[str, list[str]] | None = None
+    case_ids: list[str] | None = None
 
 
 class ProcessRequest(BaseModel):
@@ -45,6 +46,7 @@ class GraphEdge(BaseModel):
     count: int
     avg_duration_ms: float | None = None
     frequency_ratio: float
+    case_ids: list[str] = []
 
 
 class ProcessGraph(BaseModel):

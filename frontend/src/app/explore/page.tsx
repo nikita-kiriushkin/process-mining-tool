@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
-import { Loader2, AlertCircle, ArrowLeft, RefreshCw, Moon, Sun } from "lucide-react";
+import { Loader2, AlertCircle, ArrowLeft, RefreshCw, Moon, Sun, ChevronDown } from "lucide-react";
 import { processEventLog } from "@/lib/api";
 import { formatCount, formatDuration, formatPercent } from "@/lib/utils";
 import { useUploadStore } from "@/store/uploadStore";
@@ -55,6 +55,11 @@ export default function ExplorePage() {
 
   // Dark mode toggle
   const [darkMode, setDarkMode] = useState(false);
+
+  // Resizable panel sizes (px)
+  const [filterWidth, setFilterWidth] = useState(256);
+  const [detailWidth, setDetailWidth] = useState(288);
+  const [variantsHeight, setVariantsHeight] = useState(192);
   useEffect(() => {
     document.documentElement.classList.toggle("dark", darkMode);
     return () => {
@@ -121,7 +126,10 @@ export default function ExplorePage() {
       {/* Main area */}
       <div className="flex-1 flex overflow-hidden">
         {/* ── Filter panel ── */}
-        <aside className="w-64 flex-shrink-0 bg-white dark:bg-gray-800 border-r border-gray-100 dark:border-gray-700 overflow-y-auto">
+        <aside
+          style={{ width: filterWidth }}
+          className="flex-shrink-0 bg-white dark:bg-gray-800 overflow-y-auto"
+        >
           <div className="p-4">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">
               Filters
@@ -139,8 +147,13 @@ export default function ExplorePage() {
           </div>
         </aside>
 
+        <ResizeHandle
+          direction="vertical"
+          onDelta={(d) => setFilterWidth((w) => Math.max(160, Math.min(400, w + d)))}
+        />
+
         {/* ── Center: graph area ── */}
-        <main className="flex-1 overflow-hidden flex flex-col">
+        <main className="flex-1 overflow-hidden flex flex-col min-w-0">
           {isLoading && <LoadingState />}
           {isError && (
             <ErrorState
@@ -150,7 +163,7 @@ export default function ExplorePage() {
           )}
           {data && (
             <div className="flex-1 flex flex-col overflow-hidden">
-              <div className="flex-1 relative">
+              <div className="flex-1 relative min-h-0">
                 <ProcessGraph
                   graph={data.graph}
                   selectedElement={selectedElement}
@@ -160,15 +173,30 @@ export default function ExplorePage() {
                   isDark={darkMode}
                 />
               </div>
-              <div className="h-48 flex-shrink-0 overflow-y-auto bg-white dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700">
+              <ResizeHandle
+                direction="horizontal"
+                onDelta={(d) => setVariantsHeight((h) => Math.max(80, Math.min(400, h - d)))}
+              />
+              <div
+                style={{ height: variantsHeight }}
+                className="flex-shrink-0 overflow-y-auto bg-white dark:bg-gray-800"
+              >
                 <VariantsTable variants={data.variants} />
               </div>
             </div>
           )}
         </main>
 
+        <ResizeHandle
+          direction="vertical"
+          onDelta={(d) => setDetailWidth((w) => Math.max(200, Math.min(500, w - d)))}
+        />
+
         {/* ── Detail panel ── */}
-        <aside className="w-72 flex-shrink-0 bg-white dark:bg-gray-800 border-l border-gray-100 dark:border-gray-700 overflow-y-auto">
+        <aside
+          style={{ width: detailWidth }}
+          className="flex-shrink-0 bg-white dark:bg-gray-800 overflow-y-auto"
+        >
           <DetailPanel selectedElement={selectedElement} graph={data?.graph ?? null} />
         </aside>
       </div>
@@ -242,13 +270,28 @@ function FilterPanel({ data, filters, setFilters, resetFilters }: FilterPanelPro
       )
   );
 
+  // Case ID filter — one ID per line (or space-separated); committed on blur
+  const [caseIdInput, setCaseIdInput] = useState(() =>
+    (filters.case_ids ?? []).join("\n")
+  );
+
+  function parseCaseIds(raw: string): string[] {
+    return [...new Set(raw.split(/[\n\r\s,]+/).map((s) => s.trim()).filter(Boolean))];
+  }
+
+  function commitCaseIds(raw: string) {
+    const ids = parseCaseIds(raw);
+    setFilters({ case_ids: ids.length > 0 ? ids : undefined });
+  }
+
   const hasActive =
     !!filters.date_from ||
     !!filters.date_to ||
     (filters.exclude_activities?.length ?? 0) > 0 ||
     (filters.min_edge_frequency ?? 1) > 1 ||
     (filters.variant_ids?.length ?? 0) > 0 ||
-    Object.values(filters.dimension_filters ?? {}).some((v) => v.length > 0);
+    Object.values(filters.dimension_filters ?? {}).some((v) => v.length > 0) ||
+    (filters.case_ids?.length ?? 0) > 0;
 
   function handleReset() {
     setDateFrom("");
@@ -259,6 +302,7 @@ function FilterPanel({ data, filters, setFilters, resetFilters }: FilterPanelPro
     setDimSel(
       Object.fromEntries(Object.keys(data.available_dimensions).map((d) => [d, new Set<string>()]))
     );
+    setCaseIdInput("");
     resetFilters();
   }
 
@@ -301,6 +345,23 @@ function FilterPanel({ data, filters, setFilters, resetFilters }: FilterPanelPro
 
   return (
     <div className="space-y-0">
+      {/* ── Case IDs ── */}
+      <FilterSection title="Case IDs">
+        <textarea
+          rows={3}
+          value={caseIdInput}
+          onChange={(e) => setCaseIdInput(e.target.value)}
+          onBlur={(e) => commitCaseIds(e.target.value)}
+          placeholder={"Paste IDs, one per line"}
+          className="w-full text-xs font-mono border border-gray-200 dark:border-gray-600 rounded-md px-2 py-1.5 text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-400 resize-none placeholder:text-gray-300 dark:placeholder:text-gray-500"
+        />
+        {parseCaseIds(caseIdInput).length > 0 && (
+          <p className="text-[10px] text-blue-600 mt-1">
+            {parseCaseIds(caseIdInput).length} case{parseCaseIds(caseIdInput).length !== 1 ? "s" : ""} selected
+          </p>
+        )}
+      </FilterSection>
+
       {/* ── Date range ── */}
       <FilterSection title="Date Range">
         <div className="space-y-2">
@@ -452,13 +513,59 @@ function FilterPanel({ data, filters, setFilters, resetFilters }: FilterPanelPro
   );
 }
 
+// ── Resize handle ──────────────────────────────────────────────────────────
+
+function ResizeHandle({
+  direction,
+  onDelta,
+}: {
+  direction: "vertical" | "horizontal";
+  onDelta: (delta: number) => void;
+}) {
+  function handleMouseDown(e: React.MouseEvent) {
+    e.preventDefault();
+    let last = direction === "vertical" ? e.clientX : e.clientY;
+    const onMove = (ev: MouseEvent) => {
+      const curr = direction === "vertical" ? ev.clientX : ev.clientY;
+      onDelta(curr - last);
+      last = curr;
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }
+
+  return (
+    <div
+      onMouseDown={handleMouseDown}
+      className={
+        direction === "vertical"
+          ? "w-1 flex-shrink-0 cursor-col-resize bg-gray-100 dark:bg-gray-700 hover:bg-blue-300 dark:hover:bg-blue-700 transition-colors"
+          : "h-1 flex-shrink-0 cursor-row-resize bg-gray-100 dark:bg-gray-700 hover:bg-blue-300 dark:hover:bg-blue-700 transition-colors"
+      }
+    />
+  );
+}
+
 function FilterSection({ title, children }: { title: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(true);
   return (
     <div className="pb-4 mb-4 border-b border-gray-50 dark:border-gray-700 last:border-0 last:mb-0 last:pb-0">
-      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
-        {title}
-      </p>
-      {children}
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center justify-between w-full group mb-2"
+      >
+        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+          {title}
+        </p>
+        <ChevronDown
+          className={`w-3 h-3 text-gray-300 group-hover:text-gray-400 transition-transform ${open ? "" : "-rotate-90"}`}
+        />
+      </button>
+      {open && children}
     </div>
   );
 }
@@ -659,6 +766,17 @@ function NodeDetail({ node, graph }: { node: GraphNode; graph: ProcessGraphType 
 function EdgeDetail({ edge, graph }: { edge: GraphEdge; graph: ProcessGraphType | null }) {
   const sourceNode = graph?.nodes.find((n) => n.id === edge.source);
   const targetNode = graph?.nodes.find((n) => n.id === edge.target);
+  const [copied, setCopied] = useState(false);
+
+  const caseIds = edge.case_ids ?? [];
+  const sampleIds = caseIds.slice(0, 5);
+
+  function handleCopyAll() {
+    navigator.clipboard.writeText(caseIds.join("\n")).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
 
   return (
     <div className="space-y-4">
@@ -679,6 +797,37 @@ function EdgeDetail({ edge, graph }: { edge: GraphEdge; graph: ProcessGraphType 
           <DetailRow label="Avg time" value={formatDuration(edge.avg_duration_ms)} />
         )}
       </div>
+
+      {caseIds.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+              Case IDs ({caseIds.length})
+            </p>
+            <button
+              onClick={handleCopyAll}
+              className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+            >
+              {copied ? "Copied!" : "Copy all"}
+            </button>
+          </div>
+          <div className="space-y-0">
+            {sampleIds.map((id) => (
+              <div
+                key={id}
+                className="py-1 border-t border-gray-50 dark:border-gray-700 first:border-t-0"
+              >
+                <span className="text-xs font-mono text-gray-600 dark:text-gray-300">{id}</span>
+              </div>
+            ))}
+            {caseIds.length > 5 && (
+              <p className="text-[10px] text-gray-400 pt-1">
+                +{caseIds.length - 5} more
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       {sourceNode && (
         <div>

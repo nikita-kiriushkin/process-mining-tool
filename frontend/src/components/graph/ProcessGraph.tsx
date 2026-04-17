@@ -250,6 +250,20 @@ export function ProcessGraph({
   const [cyInstance, setCyInstance] = useState<cytoscape.Core | null>(null);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
 
+  // Edge curvature drag state (refs — no re-renders during drag)
+  const edgeCurvaturesRef = useRef<Record<string, number>>({});
+  const dragRef = useRef<{
+    edgeId: string;
+    startX: number;
+    startY: number;
+    startCurvature: number;
+    perpX: number;
+    perpY: number;
+  } | null>(null);
+  // Keep a ref to loopEdgeIds so event handlers don't go stale
+  const loopEdgeIdsRef = useRef(loopEdgeIds);
+  useEffect(() => { loopEdgeIdsRef.current = loopEdgeIds; }, [loopEdgeIds]);
+
   // Stable lookup maps
   const nodeMap = useMemo(
     () => Object.fromEntries(graph.nodes.map((n) => [n.id, n])),
@@ -279,10 +293,11 @@ export function ProcessGraph({
   useEffect(() => {
     if (!cyInstance) return;
 
+    const domContainer = cyInstance.container();
+
     const getRenderedPos = (evt: cytoscape.EventObject) => {
-      const container = cyInstance.container();
-      if (!container) return { x: 0, y: 0 };
-      const rect = container.getBoundingClientRect();
+      if (!domContainer) return { x: 0, y: 0 };
+      const rect = domContainer.getBoundingClientRect();
       const pos = evt.renderedPosition;
       return { x: rect.left + pos.x + 14, y: rect.top + pos.y - 14 };
     };
@@ -315,9 +330,52 @@ export function ProcessGraph({
       const { x, y } = getRenderedPos(evt);
       const d = (evt.target as cytoscape.EdgeSingular).data();
       setTooltip({ x, y, type: "edge", data: d });
+      // Show grab cursor for draggable (non-loop) edges
+      if (domContainer && !dragRef.current && !loopEdgeIdsRef.current.has(d.id as string)) {
+        domContainer.style.cursor = "grab";
+      }
     };
 
-    const onOut = () => setTooltip(null);
+    const onOut = () => {
+      setTooltip(null);
+      if (domContainer && !dragRef.current) domContainer.style.cursor = "";
+    };
+
+    // ── Edge curvature drag ────────────────────────────────────────────────
+    const onEdgeMousedown = (evt: cytoscape.EventObject) => {
+      const edge = evt.target as cytoscape.EdgeSingular;
+      const edgeId = edge.id();
+      if (loopEdgeIdsRef.current.has(edgeId)) return;
+
+      const src = edge.source().renderedPosition();
+      const tgt = edge.target().renderedPosition();
+      const dx = tgt.x - src.x;
+      const dy = tgt.y - src.y;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      if (len < 1) return;
+
+      const rp = evt.renderedPosition;
+      dragRef.current = {
+        edgeId,
+        startX: rp.x,
+        startY: rp.y,
+        startCurvature: edgeCurvaturesRef.current[edgeId] ?? 0,
+        // Left perpendicular of the edge direction (CCW in model coords)
+        perpX: -dy / len,
+        perpY: dx / len,
+      };
+      cyInstance.userPanningEnabled(false);
+      if (domContainer) domContainer.style.cursor = "grabbing";
+    };
+
+    // Double-click resets curvature to default bezier routing
+    const onEdgeDblclick = (evt: cytoscape.EventObject) => {
+      const edge = evt.target as cytoscape.EdgeSingular;
+      const edgeId = edge.id();
+      if (loopEdgeIdsRef.current.has(edgeId)) return;
+      delete edgeCurvaturesRef.current[edgeId];
+      edge.removeStyle("curve-style control-point-distances");
+    };
 
     cyInstance.on("tap", "node", onNodeTap);
     cyInstance.on("tap", "edge", onEdgeTap);
@@ -327,11 +385,62 @@ export function ProcessGraph({
     cyInstance.on("mouseout", "node, edge", onOut);
     cyInstance.on("drag", onOut);
     cyInstance.on("zoom pan", onOut);
+    cyInstance.on("mousedown", "edge", onEdgeMousedown);
+    cyInstance.on("dblclick", "edge", onEdgeDblclick);
 
     return () => {
       cyInstance.removeAllListeners();
     };
   }, [cyInstance, nodeMap, edgeMap, onSelectElement]);
+
+  // ── Document-level mouse events for edge drag ────────────────────────────
+  useEffect(() => {
+    if (!cyInstance) return;
+
+    const onMousemove = (evt: MouseEvent) => {
+      if (!dragRef.current) return;
+      const { edgeId, startX, startY, startCurvature, perpX, perpY } = dragRef.current;
+
+      const container = cyInstance.container();
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+
+      const mouseX = evt.clientX - rect.left;
+      const mouseY = evt.clientY - rect.top;
+      const deltaX = mouseX - startX;
+      const deltaY = mouseY - startY;
+
+      // Project mouse delta onto the edge perpendicular, then convert to model coords
+      const renderedDelta = deltaX * perpX + deltaY * perpY;
+      const modelDelta = renderedDelta / cyInstance.zoom();
+      const newCurvature = startCurvature + modelDelta;
+
+      edgeCurvaturesRef.current[edgeId] = newCurvature;
+
+      const edge = cyInstance.getElementById(edgeId);
+      if (edge.length > 0) {
+        edge.style({
+          "curve-style": "unbundled-bezier",
+          "control-point-distances": [newCurvature],
+        });
+      }
+    };
+
+    const onMouseup = () => {
+      if (!dragRef.current) return;
+      dragRef.current = null;
+      cyInstance.userPanningEnabled(true);
+      const container = cyInstance.container();
+      if (container) container.style.cursor = "";
+    };
+
+    document.addEventListener("mousemove", onMousemove);
+    document.addEventListener("mouseup", onMouseup);
+    return () => {
+      document.removeEventListener("mousemove", onMousemove);
+      document.removeEventListener("mouseup", onMouseup);
+    };
+  }, [cyInstance]);
 
   // Sync external selectedElement to Cytoscape selection
   useEffect(() => {

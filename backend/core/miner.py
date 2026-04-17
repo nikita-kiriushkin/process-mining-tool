@@ -57,7 +57,16 @@ def build_process_graph(df: pd.DataFrame) -> dict:
     edge_groups = df_shifted.groupby(["activity_name", "_next_activity"])
     edge_counts = edge_groups.size().reset_index(name="count")
     edge_durations = edge_groups["_duration_ms"].mean().reset_index(name="avg_duration_ms")
-    edges_df = edge_counts.merge(edge_durations, on=["activity_name", "_next_activity"])
+    edge_case_ids = (
+        edge_groups["case_id"]
+        .apply(lambda x: sorted(x.unique().tolist()))
+        .reset_index(name="case_ids")
+    )
+    edges_df = (
+        edge_counts
+        .merge(edge_durations, on=["activity_name", "_next_activity"])
+        .merge(edge_case_ids, on=["activity_name", "_next_activity"])
+    )
 
     total_edge_count = edges_df["count"].sum()
 
@@ -91,6 +100,7 @@ def build_process_graph(df: pd.DataFrame) -> dict:
         cnt = int(row["count"])
         avg_dur = float(row["avg_duration_ms"]) if not pd.isna(row["avg_duration_ms"]) else None
         freq_ratio = cnt / total_edge_count if total_edge_count > 0 else 0.0
+        case_ids = list(row["case_ids"]) if row["case_ids"] is not None else []
         edge_objs.append(
             GraphEdge(
                 id=f"{src}→{tgt}",
@@ -99,6 +109,7 @@ def build_process_graph(df: pd.DataFrame) -> dict:
                 count=cnt,
                 avg_duration_ms=avg_dur,
                 frequency_ratio=round(freq_ratio, 4),
+                case_ids=case_ids,
             )
         )
 
