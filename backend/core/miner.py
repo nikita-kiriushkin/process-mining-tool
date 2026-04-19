@@ -85,6 +85,8 @@ def build_process_graph(df: pd.DataFrame) -> dict:
                 id=activity,
                 label=activity,
                 count=activity_counts[activity],
+                start_count=int(start_counts.get(activity, 0)),
+                end_count=int(end_counts.get(activity, 0)),
                 avg_duration_before_ms=incoming_avg.get(activity),
                 avg_position=round(avg_position.get(activity, 0.5), 3),
                 is_start=activity in start_activities,

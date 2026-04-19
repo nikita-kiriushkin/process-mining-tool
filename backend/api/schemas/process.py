@@ -33,6 +33,8 @@ class GraphNode(BaseModel):
     id: str
     label: str
     count: int
+    start_count: int = 0
+    end_count: int = 0
     avg_duration_before_ms: float | None = None
     avg_position: float
     is_start: bool

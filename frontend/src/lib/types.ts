@@ -26,6 +26,8 @@ export interface GraphNode {
   id: string;
   label: string;
   count: number;
+  start_count: number;
+  end_count: number;
   avg_duration_before_ms: number | null;
   avg_position: number;
   is_start: boolean;

@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
-import { Loader2, AlertCircle, ArrowLeft, RefreshCw, Moon, Sun, ChevronDown } from "lucide-react";
+import { Loader2, AlertCircle, ArrowLeft, RefreshCw, Moon, Sun, ChevronDown, GripVertical } from "lucide-react";
 import { processEventLog } from "@/lib/api";
 import { formatCount, formatDuration, formatPercent } from "@/lib/utils";
 import { useUploadStore } from "@/store/uploadStore";
@@ -56,6 +56,35 @@ export default function ExplorePage() {
   // Dark mode toggle
   const [darkMode, setDarkMode] = useState(false);
 
+  // Display options (frontend-only, not sent to backend)
+  const [showSynthetic, setShowSynthetic] = useState(true);
+
+  // Layout reset counter — incrementing triggers ProcessGraph to re-run preset layout
+  const [resetLayoutKey, setResetLayoutKey] = useState(0);
+
+  // Activity order — null means "use default (avg_position)"
+  const defaultActivityOrder = useMemo(
+    () =>
+      [...(data?.graph.nodes ?? [])]
+        .sort((a, b) => a.avg_position - b.avg_position)
+        .map((n) => n.id),
+    [data]
+  );
+  const [customActivityOrder, setCustomActivityOrder] = useState<string[] | null>(null);
+  // Reset custom order only when the set of activity IDs changes (e.g. activity excluded,
+  // variant filter applied). Filters that only affect edges — like min_edge_frequency —
+  // leave the node set unchanged and must not disturb a custom order.
+  const activityIdsRef = useRef<string>("");
+  useEffect(() => {
+    if (!data) return; // data is undefined while a fetch is in-flight; don't reset
+    const ids = data.graph.nodes.map((n) => n.id).sort().join("|");
+    if (ids !== activityIdsRef.current) {
+      activityIdsRef.current = ids;
+      setCustomActivityOrder(null);
+    }
+  }, [data]);
+  const activityOrder = customActivityOrder ?? defaultActivityOrder;
+
   // Resizable panel sizes (px)
   const [filterWidth, setFilterWidth] = useState(256);
   const [detailWidth, setDetailWidth] = useState(288);
@@ -68,22 +97,54 @@ export default function ExplorePage() {
     };
   }, [darkMode]);
 
-  // Happy-path edge ids: consecutive pairs in the most-frequent variant
-  const happyPathEdgeIds = useMemo(() => {
-    if (!data?.variants?.length) return new Set<string>();
-    const top = data.variants[0];
-    const ids = new Set<string>();
-    for (let i = 0; i < top.activities.length - 1; i++) {
-      ids.add(`${top.activities[i]}→${top.activities[i + 1]}`);
-    }
-    return ids;
-  }, [data]);
-
   // Loop edge ids: self-loops where source === target
   const loopEdgeIds = useMemo(
     () => new Set((data?.graph?.edges ?? []).filter((e) => e.source === e.target).map((e) => e.id)),
     [data]
   );
+
+  // Augmented graph: prepend [Synthetic] Start and append [Synthetic] End with their edges.
+  // These give every activity a balanced inflow/outflow without touching the API data model.
+  const graphWithSynthetic = useMemo((): ProcessGraphType | null => {
+    if (!data) return null;
+    const nodes = data.graph.nodes;
+
+    const totalStart = nodes.reduce((s, n) => s + n.start_count, 0);
+    const totalEnd   = nodes.reduce((s, n) => s + n.end_count,   0);
+
+    const synStart: GraphNode = {
+      id: "[Synthetic] Start", label: "[Synthetic] Start",
+      count: totalStart, start_count: 0, end_count: 0,
+      avg_duration_before_ms: null, avg_position: 0,
+      is_start: false, is_end: false,
+    };
+    const synEnd: GraphNode = {
+      id: "[Synthetic] End", label: "[Synthetic] End",
+      count: totalEnd, start_count: 0, end_count: 0,
+      avg_duration_before_ms: null, avg_position: 1,
+      is_start: false, is_end: false,
+    };
+
+    const startEdges: GraphEdge[] = nodes
+      .filter(n => n.start_count > 0)
+      .map(n => ({
+        id: `[Synthetic] Start→${n.id}`,
+        source: "[Synthetic] Start", target: n.id,
+        count: n.start_count, avg_duration_ms: null, frequency_ratio: 0, case_ids: [],
+      }));
+    const endEdges: GraphEdge[] = nodes
+      .filter(n => n.end_count > 0)
+      .map(n => ({
+        id: `${n.id}→[Synthetic] End`,
+        source: n.id, target: "[Synthetic] End",
+        count: n.end_count, avg_duration_ms: null, frequency_ratio: 0, case_ids: [],
+      }));
+
+    return {
+      nodes: [synStart, ...nodes, synEnd],
+      edges: [...startEdges, ...data.graph.edges, ...endEdges],
+    };
+  }, [data]);
 
   if (!sessionId || !columnMapping.case_id) return null;
 
@@ -132,7 +193,7 @@ export default function ExplorePage() {
         >
           <div className="p-4">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">
-              Filters
+              Configuration
             </p>
             {data ? (
               <FilterPanel
@@ -140,6 +201,12 @@ export default function ExplorePage() {
                 filters={filters}
                 setFilters={setFilters}
                 resetFilters={resetFilters}
+                showSynthetic={showSynthetic}
+                onToggleSynthetic={setShowSynthetic}
+                onResetLayout={() => setResetLayoutKey((k) => k + 1)}
+                activityOrder={activityOrder}
+                defaultActivityOrder={defaultActivityOrder}
+                onSetActivityOrder={setCustomActivityOrder}
               />
             ) : (
               <div className="text-xs text-gray-400">Loading…</div>
@@ -165,11 +232,13 @@ export default function ExplorePage() {
             <div className="flex-1 flex flex-col overflow-hidden">
               <div className="flex-1 relative min-h-0">
                 <ProcessGraph
-                  graph={data.graph}
+                  graph={graphWithSynthetic!}
                   selectedElement={selectedElement}
                   onSelectElement={setSelectedElement}
-                  happyPathEdgeIds={happyPathEdgeIds}
                   loopEdgeIds={loopEdgeIds}
+                  activityOrder={activityOrder}
+                  showSynthetic={showSynthetic}
+                  resetLayoutKey={resetLayoutKey}
                   isDark={darkMode}
                 />
               </div>
@@ -197,7 +266,7 @@ export default function ExplorePage() {
           style={{ width: detailWidth }}
           className="flex-shrink-0 bg-white dark:bg-gray-800 overflow-y-auto"
         >
-          <DetailPanel selectedElement={selectedElement} graph={data?.graph ?? null} />
+          <DetailPanel selectedElement={selectedElement} graph={graphWithSynthetic} isDark={darkMode} />
         </aside>
       </div>
     </div>
@@ -235,9 +304,15 @@ interface FilterPanelProps {
   filters: ProcessFilters;
   setFilters: (f: Partial<ProcessFilters>) => void;
   resetFilters: () => void;
+  showSynthetic: boolean;
+  onToggleSynthetic: (v: boolean) => void;
+  onResetLayout: () => void;
+  activityOrder: string[];
+  defaultActivityOrder: string[];
+  onSetActivityOrder: (order: string[] | null) => void;
 }
 
-function FilterPanel({ data, filters, setFilters, resetFilters }: FilterPanelProps) {
+function FilterPanel({ data, filters, setFilters, resetFilters, showSynthetic, onToggleSynthetic, onResetLayout, activityOrder, defaultActivityOrder, onSetActivityOrder }: FilterPanelProps) {
   // Date range — commit immediately on change
   const [dateFrom, setDateFrom] = useState(filters.date_from ?? "");
   const [dateTo, setDateTo] = useState(filters.date_to ?? "");
@@ -344,170 +419,219 @@ function FilterPanel({ data, filters, setFilters, resetFilters }: FilterPanelPro
   const dateMax = data.summary.date_max.slice(0, 10);
 
   return (
-    <div className="space-y-0">
-      {/* ── Case IDs ── */}
-      <FilterSection title="Case IDs">
-        <textarea
-          rows={3}
-          value={caseIdInput}
-          onChange={(e) => setCaseIdInput(e.target.value)}
-          onBlur={(e) => commitCaseIds(e.target.value)}
-          placeholder={"Paste IDs, one per line"}
-          className="w-full text-xs font-mono border border-gray-200 dark:border-gray-600 rounded-md px-2 py-1.5 text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-400 resize-none placeholder:text-gray-300 dark:placeholder:text-gray-500"
-        />
-        {parseCaseIds(caseIdInput).length > 0 && (
-          <p className="text-[10px] text-blue-600 mt-1">
-            {parseCaseIds(caseIdInput).length} case{parseCaseIds(caseIdInput).length !== 1 ? "s" : ""} selected
-          </p>
-        )}
-      </FilterSection>
-
-      {/* ── Date range ── */}
-      <FilterSection title="Date Range">
-        <div className="space-y-2">
-          <div>
-            <p className="text-[10px] text-gray-400 mb-0.5">From</p>
-            <input
-              type="date"
-              value={dateFrom}
-              min={dateMin}
-              max={dateMax}
-              className="w-full text-xs border border-gray-200 dark:border-gray-600 rounded-md px-2 py-1.5 text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
-              onChange={(e) => {
-                setDateFrom(e.target.value);
-                setFilters({ date_from: e.target.value || undefined });
-              }}
-            />
-          </div>
-          <div>
-            <p className="text-[10px] text-gray-400 mb-0.5">To</p>
-            <input
-              type="date"
-              value={dateTo}
-              min={dateMin}
-              max={dateMax}
-              className="w-full text-xs border border-gray-200 dark:border-gray-600 rounded-md px-2 py-1.5 text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
-              onChange={(e) => {
-                setDateTo(e.target.value);
-                setFilters({ date_to: e.target.value || undefined });
-              }}
-            />
-          </div>
-          <p className="text-[10px] text-gray-400">
-            Data: {dateMin} → {dateMax}
+    <div>
+      {/* ══ Display Settings subsection ══ */}
+      <div className="mb-5">
+        <div className="-mx-4 px-4 py-2 mb-0 bg-gray-50 dark:bg-gray-700/50 border-b border-gray-100 dark:border-gray-700">
+          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-widest">
+            Display Settings
           </p>
         </div>
-      </FilterSection>
 
-      {/* ── Activities ── */}
-      <FilterSection title={`Activities (${data.available_activities.length})`}>
-        <div className="space-y-0.5 max-h-44 overflow-y-auto pr-0.5">
-          {data.available_activities.map((act) => (
-            <label key={act} className="flex items-start gap-2 cursor-pointer group py-1">
-              <input
-                type="checkbox"
-                checked={!excluded.has(act)}
-                onChange={(e) => toggleActivity(act, e.target.checked)}
-                className="mt-0.5 h-3 w-3 flex-shrink-0 rounded border-gray-300 text-blue-600 focus:ring-blue-400 cursor-pointer"
-              />
-              <span className="text-xs text-gray-600 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white leading-tight break-words min-w-0">
-                {act}
-              </span>
-            </label>
-          ))}
-        </div>
-        {excluded.size > 0 && (
-          <p className="text-[10px] text-amber-600 mt-1.5">{excluded.size} excluded</p>
-        )}
-      </FilterSection>
-
-      {/* ── Min edge frequency ── */}
-      {maxEdge > 1 && (
-        <FilterSection title="Min Edge Frequency">
-          <div className="space-y-2">
+        {/* ── Display ── */}
+        <FilterSection title="Display">
+          <label className="flex items-center gap-2 cursor-pointer group py-1">
             <input
-              type="range"
-              min={1}
-              max={maxEdge}
-              step={1}
-              value={minFreq}
-              className="w-full h-1.5 accent-blue-600 cursor-pointer"
-              onChange={(e) => setMinFreq(Number(e.target.value))}
-              onMouseUp={(e) => commitSlider(Number((e.target as HTMLInputElement).value))}
-              onTouchEnd={(e) => commitSlider(Number((e.target as HTMLInputElement).value))}
+              type="checkbox"
+              checked={showSynthetic}
+              onChange={(e) => onToggleSynthetic(e.target.checked)}
+              className="h-3 w-3 flex-shrink-0 rounded border-gray-300 text-blue-600 focus:ring-blue-400 cursor-pointer"
             />
-            <div className="flex justify-between text-[10px] text-gray-400">
-              <span>1</span>
-              <span className="text-blue-600 font-semibold">{minFreq}×</span>
-              <span>{maxEdge}</span>
-            </div>
-          </div>
+            <span className="text-xs text-gray-600 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white">
+              Show synthetic Start / End
+            </span>
+          </label>
+          <button
+            onClick={onResetLayout}
+            className="mt-1 w-full text-left text-xs text-blue-500 hover:text-blue-600 dark:text-blue-400 py-1"
+          >
+            Reset layout
+          </button>
         </FilterSection>
-      )}
 
-      {/* ── Variants ── */}
-      {data.variants.length > 1 && (
-        <FilterSection title={`Variants (${data.variants.length})`}>
-          <div className="space-y-0.5 max-h-40 overflow-y-auto pr-0.5">
-            {data.variants.slice(0, 10).map((v) => (
-              <label key={v.variant_id} className="flex items-start gap-2 cursor-pointer group py-1">
-                <input
-                  type="checkbox"
-                  checked={selVariants.has(v.variant_id)}
-                  onChange={(e) => toggleVariant(v.variant_id, e.target.checked)}
-                  className="mt-0.5 h-3 w-3 flex-shrink-0 rounded border-gray-300 text-blue-600 focus:ring-blue-400 cursor-pointer"
-                />
-                <span className="text-xs text-gray-600 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white leading-tight min-w-0">
-                  <span className="text-gray-400 mr-1">#{v.variant_id}</span>
-                  <span className="break-words">{v.activities.join(" → ")}</span>
-                  <span className="text-gray-400 ml-1">({formatCount(v.count)})</span>
-                </span>
-              </label>
-            ))}
-          </div>
-          {selVariants.size > 0 && (
-            <p className="text-[10px] text-blue-600 mt-1.5">
-              {selVariants.size} of {data.variants.length} selected
+        {/* ── Activity Order ── */}
+        <FilterSection title="Activity Order">
+          <ActivityOrderList
+            order={activityOrder}
+            defaultOrder={defaultActivityOrder}
+            onCommit={(o) => onSetActivityOrder(o)}
+            nodes={data.graph.nodes}
+          />
+        </FilterSection>
+      </div>
+
+      {/* ══ Filters subsection ══ */}
+      <div>
+        <div className="-mx-4 px-4 py-2 mb-0 bg-gray-50 dark:bg-gray-700/50 border-b border-gray-100 dark:border-gray-700">
+          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-widest">
+            Filters
+          </p>
+        </div>
+
+        {/* ── Case IDs ── */}
+        <FilterSection title="Case IDs">
+          <textarea
+            rows={3}
+            value={caseIdInput}
+            onChange={(e) => setCaseIdInput(e.target.value)}
+            onBlur={(e) => commitCaseIds(e.target.value)}
+            placeholder={"Paste IDs, one per line"}
+            className="w-full text-xs font-mono border border-gray-200 dark:border-gray-600 rounded-md px-2 py-1.5 text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-400 resize-none placeholder:text-gray-300 dark:placeholder:text-gray-500"
+          />
+          {parseCaseIds(caseIdInput).length > 0 && (
+            <p className="text-[10px] text-blue-600 mt-1">
+              {parseCaseIds(caseIdInput).length} case{parseCaseIds(caseIdInput).length !== 1 ? "s" : ""} selected
             </p>
           )}
         </FilterSection>
-      )}
 
-      {/* ── Dimension filters ── */}
-      {Object.entries(data.available_dimensions).map(([dim, values]) => (
-        <FilterSection key={dim} title={dim.charAt(0).toUpperCase() + dim.slice(1)}>
-          <div className="space-y-0.5 max-h-32 overflow-y-auto pr-0.5">
-            {values.map((val) => (
-              <label key={val} className="flex items-start gap-2 cursor-pointer group py-1">
+        {/* ── Date range ── */}
+        <FilterSection title="Date Range">
+          <div className="space-y-2">
+            <div>
+              <p className="text-[10px] text-gray-400 mb-0.5">From</p>
+              <input
+                type="date"
+                value={dateFrom}
+                min={dateMin}
+                max={dateMax}
+                className="w-full text-xs border border-gray-200 dark:border-gray-600 rounded-md px-2 py-1.5 text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                onChange={(e) => {
+                  setDateFrom(e.target.value);
+                  setFilters({ date_from: e.target.value || undefined });
+                }}
+              />
+            </div>
+            <div>
+              <p className="text-[10px] text-gray-400 mb-0.5">To</p>
+              <input
+                type="date"
+                value={dateTo}
+                min={dateMin}
+                max={dateMax}
+                className="w-full text-xs border border-gray-200 dark:border-gray-600 rounded-md px-2 py-1.5 text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                onChange={(e) => {
+                  setDateTo(e.target.value);
+                  setFilters({ date_to: e.target.value || undefined });
+                }}
+              />
+            </div>
+            <p className="text-[10px] text-gray-400">
+              Data: {dateMin} → {dateMax}
+            </p>
+          </div>
+        </FilterSection>
+
+        {/* ── Activities ── */}
+        <FilterSection title={`Activities (${data.available_activities.length})`}>
+          <div className="space-y-0.5 max-h-44 overflow-y-auto pr-0.5">
+            {data.available_activities.map((act) => (
+              <label key={act} className="flex items-start gap-2 cursor-pointer group py-1">
                 <input
                   type="checkbox"
-                  checked={dimSel[dim]?.has(val) ?? false}
-                  onChange={(e) => toggleDim(dim, val, e.target.checked)}
+                  checked={!excluded.has(act)}
+                  onChange={(e) => toggleActivity(act, e.target.checked)}
                   className="mt-0.5 h-3 w-3 flex-shrink-0 rounded border-gray-300 text-blue-600 focus:ring-blue-400 cursor-pointer"
                 />
-                <span className="text-xs text-gray-600 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white leading-tight">
-                  {val}
+                <span className="text-xs text-gray-600 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white leading-tight break-words min-w-0">
+                  {act}
                 </span>
               </label>
             ))}
           </div>
-          {(dimSel[dim]?.size ?? 0) > 0 && (
-            <p className="text-[10px] text-blue-600 mt-1.5">{dimSel[dim].size} selected</p>
+          {excluded.size > 0 && (
+            <p className="text-[10px] text-amber-600 mt-1.5">{excluded.size} excluded</p>
           )}
         </FilterSection>
-      ))}
 
-      {/* ── Reset ── */}
-      <div className="pt-4">
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={handleReset}
-          disabled={!hasActive}
-          className="w-full"
-        >
-          Reset Filters
-        </Button>
+        {/* ── Min edge frequency ── */}
+        {maxEdge > 1 && (
+          <FilterSection title="Min Edge Frequency">
+            <div className="space-y-2">
+              <input
+                type="range"
+                min={1}
+                max={maxEdge}
+                step={1}
+                value={minFreq}
+                className="w-full h-1.5 accent-blue-600 cursor-pointer"
+                onChange={(e) => setMinFreq(Number(e.target.value))}
+                onMouseUp={(e) => commitSlider(Number((e.target as HTMLInputElement).value))}
+                onTouchEnd={(e) => commitSlider(Number((e.target as HTMLInputElement).value))}
+              />
+              <div className="flex justify-between text-[10px] text-gray-400">
+                <span>1</span>
+                <span className="text-blue-600 font-semibold">{minFreq}×</span>
+                <span>{maxEdge}</span>
+              </div>
+            </div>
+          </FilterSection>
+        )}
+
+        {/* ── Variants ── */}
+        {data.variants.length > 1 && (
+          <FilterSection title={`Variants (${data.variants.length})`}>
+            <div className="space-y-0.5 max-h-40 overflow-y-auto pr-0.5">
+              {data.variants.slice(0, 10).map((v) => (
+                <label key={v.variant_id} className="flex items-start gap-2 cursor-pointer group py-1">
+                  <input
+                    type="checkbox"
+                    checked={selVariants.has(v.variant_id)}
+                    onChange={(e) => toggleVariant(v.variant_id, e.target.checked)}
+                    className="mt-0.5 h-3 w-3 flex-shrink-0 rounded border-gray-300 text-blue-600 focus:ring-blue-400 cursor-pointer"
+                  />
+                  <span className="text-xs text-gray-600 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white leading-tight min-w-0">
+                    <span className="text-gray-400 mr-1">#{v.variant_id}</span>
+                    <span className="break-words">{v.activities.join(" → ")}</span>
+                    <span className="text-gray-400 ml-1">({formatCount(v.count)})</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            {selVariants.size > 0 && (
+              <p className="text-[10px] text-blue-600 mt-1.5">
+                {selVariants.size} of {data.variants.length} selected
+              </p>
+            )}
+          </FilterSection>
+        )}
+
+        {/* ── Dimension filters ── */}
+        {Object.entries(data.available_dimensions).map(([dim, values]) => (
+          <FilterSection key={dim} title={dim.charAt(0).toUpperCase() + dim.slice(1)}>
+            <div className="space-y-0.5 max-h-32 overflow-y-auto pr-0.5">
+              {values.map((val) => (
+                <label key={val} className="flex items-start gap-2 cursor-pointer group py-1">
+                  <input
+                    type="checkbox"
+                    checked={dimSel[dim]?.has(val) ?? false}
+                    onChange={(e) => toggleDim(dim, val, e.target.checked)}
+                    className="mt-0.5 h-3 w-3 flex-shrink-0 rounded border-gray-300 text-blue-600 focus:ring-blue-400 cursor-pointer"
+                  />
+                  <span className="text-xs text-gray-600 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white leading-tight">
+                    {val}
+                  </span>
+                </label>
+              ))}
+            </div>
+            {(dimSel[dim]?.size ?? 0) > 0 && (
+              <p className="text-[10px] text-blue-600 mt-1.5">{dimSel[dim].size} selected</p>
+            )}
+          </FilterSection>
+        ))}
+
+        {/* ── Reset ── */}
+        <div className="pt-4">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleReset}
+            disabled={!hasActive}
+            className="w-full"
+          >
+            Reset Filters
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -550,22 +674,99 @@ function ResizeHandle({
   );
 }
 
+// ── Activity order drag-and-drop list ─────────────────────────────────────
+
+function ActivityOrderList({
+  order,
+  defaultOrder,
+  onCommit,
+  nodes,
+}: {
+  order: string[];
+  defaultOrder: string[];
+  onCommit: (order: string[]) => void;
+  nodes: GraphNode[];
+}) {
+  const [liveOrder, setLiveOrder] = useState(order);
+  const dragIdx = useRef<number | null>(null);
+
+  // Sync when the prop changes (e.g. after data reload)
+  useEffect(() => { setLiveOrder(order); }, [order]);
+
+  const avgPos = useMemo(
+    () => Object.fromEntries(nodes.map((n) => [n.id, n.avg_position])),
+    [nodes]
+  );
+
+  const isDefault = liveOrder.join(",") === defaultOrder.join(",");
+
+  const handleDragStart = (_e: React.DragEvent, i: number) => {
+    dragIdx.current = i;
+  };
+
+  const handleDragOver = (e: React.DragEvent, i: number) => {
+    e.preventDefault();
+    if (dragIdx.current === null || dragIdx.current === i) return;
+    const next = [...liveOrder];
+    const [moved] = next.splice(dragIdx.current, 1);
+    next.splice(i, 0, moved);
+    dragIdx.current = i;
+    setLiveOrder(next);
+  };
+
+  const handleDragEnd = () => {
+    dragIdx.current = null;
+    onCommit(liveOrder);
+  };
+
+  return (
+    <div>
+      <div className="space-y-0.5">
+        {liveOrder.map((id, i) => (
+          <div
+            key={id}
+            draggable
+            onDragStart={(e) => handleDragStart(e, i)}
+            onDragOver={(e) => handleDragOver(e, i)}
+            onDragEnd={handleDragEnd}
+            className="flex items-center gap-1.5 px-1 py-1 rounded cursor-grab active:cursor-grabbing hover:bg-gray-50 dark:hover:bg-gray-700 select-none"
+          >
+            <GripVertical className="w-3 h-3 text-gray-300 dark:text-gray-600 flex-shrink-0" />
+            <span className="text-xs text-gray-600 dark:text-gray-300 truncate flex-1 min-w-0">{id}</span>
+            <span className="text-[10px] text-gray-400 tabular-nums flex-shrink-0">
+              {((avgPos[id] ?? 0) * 100).toFixed(0)}%
+            </span>
+          </div>
+        ))}
+      </div>
+      {!isDefault && (
+        <button
+          onClick={() => { setLiveOrder(defaultOrder); onCommit(defaultOrder); }}
+          className="mt-2 text-[10px] text-blue-500 hover:text-blue-600 dark:text-blue-400"
+        >
+          Reset to default
+        </button>
+      )}
+    </div>
+  );
+}
+
 function FilterSection({ title, children }: { title: string; children: React.ReactNode }) {
   const [open, setOpen] = useState(true);
   return (
-    <div className="pb-4 mb-4 border-b border-gray-50 dark:border-gray-700 last:border-0 last:mb-0 last:pb-0">
+    <div className="border-b border-gray-100 dark:border-gray-700 last:border-0">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center justify-between w-full group mb-2"
+        className="flex items-center justify-between w-full group py-2.5"
       >
-        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+        <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
           {title}
-        </p>
+        </span>
         <ChevronDown
-          className={`w-3 h-3 text-gray-300 group-hover:text-gray-400 transition-transform ${open ? "" : "-rotate-90"}`}
+          className={`w-3 h-3 text-gray-400 dark:text-gray-500 group-hover:text-gray-600 dark:group-hover:text-gray-300 transition-transform flex-shrink-0 ${open ? "" : "-rotate-90"}`}
         />
       </button>
-      {open && children}
+      {open && <div className="pb-3">{children}</div>}
     </div>
   );
 }
@@ -628,9 +829,11 @@ function VariantsTable({ variants }: { variants: ProcessResponse["variants"] }) 
 function DetailPanel({
   selectedElement,
   graph,
+  isDark = false,
 }: {
   selectedElement: SelectedElement;
   graph: ProcessGraphType | null;
+  isDark?: boolean;
 }) {
   return (
     <div className="p-4">
@@ -655,7 +858,7 @@ function DetailPanel({
         </div>
       )}
       {selectedElement?.type === "node" && (
-        <NodeDetail node={selectedElement.data} graph={graph} />
+        <NodeDetail node={selectedElement.data} graph={graph} isDark={isDark} />
       )}
       {selectedElement?.type === "edge" && (
         <EdgeDetail edge={selectedElement.data} graph={graph} />
@@ -664,7 +867,147 @@ function DetailPanel({
   );
 }
 
-function NodeDetail({ node, graph }: { node: GraphNode; graph: ProcessGraphType | null }) {
+// Categorical palette — each hue is perceptually distinct
+const FLOW_COLORS = ["#60a5fa", "#fb923c", "#a78bfa", "#34d399", "#f472b6", "#facc15", "#38bdf8", "#f87171"];
+
+// Fixed colors for special nodes — always the same regardless of position in the list
+const PINNED_COLORS: Record<string, string> = {
+  "[Synthetic] Start": "#94a3b8",  // slate-400 — matches synthetic node style
+  "[Synthetic] End":   "#64748b",  // slate-500
+  "Lost":              "#f87171",  // red-400
+};
+
+function NodeFlowChart({
+  edges,
+  title,
+  labelKey,
+  isDark,
+  extraItems = [],
+}: {
+  edges: GraphEdge[];
+  title: string;
+  labelKey: "source" | "target";
+  isDark: boolean;
+  extraItems?: { label: string; count: number; color: string }[];
+}) {
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+
+  // extraItems lead; then edge-derived items.
+  // Pinned labels always get their fixed color; the palette index only advances for unpinned ones.
+  let paletteIdx = extraItems.length;
+  const allItems = [
+    ...extraItems,
+    ...edges.map((e) => {
+      const label = e[labelKey];
+      const pinned = PINNED_COLORS[label];
+      if (pinned) return { label, count: e.count, color: pinned };
+      const color = FLOW_COLORS[paletteIdx % FLOW_COLORS.length];
+      paletteIdx++;
+      return { label, count: e.count, color };
+    }),
+  ];
+
+  const total = allItems.reduce((s, item) => s + item.count, 0);
+  if (allItems.length === 0 || total === 0) return null;
+
+  const R = 38, Ri = 23, CX = 44, CY = 44;
+  let angle = -Math.PI / 2;
+
+  const slices = allItems.map((item) => {
+    const frac = item.count / total;
+    // Clamp to just under 2π so arc endpoints never coincide (single-item case)
+    const span = Math.min(frac * 2 * Math.PI, 2 * Math.PI - 0.001);
+    const a0 = angle;
+    const a1 = a0 + span;
+    angle += frac * 2 * Math.PI;
+    const large = span > Math.PI ? 1 : 0;
+    const d = [
+      `M${CX + R * Math.cos(a0)} ${CY + R * Math.sin(a0)}`,
+      `A${R} ${R} 0 ${large} 1 ${CX + R * Math.cos(a1)} ${CY + R * Math.sin(a1)}`,
+      `L${CX + Ri * Math.cos(a1)} ${CY + Ri * Math.sin(a1)}`,
+      `A${Ri} ${Ri} 0 ${large} 0 ${CX + Ri * Math.cos(a0)} ${CY + Ri * Math.sin(a0)}`,
+      "Z",
+    ].join(" ");
+    return { d, label: item.label, count: item.count, pct: Math.round(frac * 100), color: item.color };
+  });
+
+  return (
+    <div>
+      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
+        {title}
+      </p>
+      <div className="flex items-start gap-3">
+        <svg width="88" height="88" viewBox="0 0 88 88" className="flex-shrink-0">
+          {slices.map((s, i) => (
+            <path
+              key={i}
+              d={s.d}
+              fill={s.color}
+              style={{
+                opacity: hoveredIdx == null || hoveredIdx === i ? 1 : 0.3,
+                transition: "opacity 0.1s",
+                cursor: "default",
+              }}
+              onMouseEnter={() => setHoveredIdx(i)}
+              onMouseLeave={() => setHoveredIdx(null)}
+            />
+          ))}
+          <text
+            x={CX} y={CY - 4}
+            textAnchor="middle" fontSize="10" fontWeight="600"
+            fill={isDark ? "#f3f4f6" : "#111827"}
+          >
+            {formatCount(total)}
+          </text>
+          <text
+            x={CX} y={CY + 7}
+            textAnchor="middle" fontSize="7"
+            fill={isDark ? "#9ca3af" : "#6b7280"}
+          >
+            cases
+          </text>
+        </svg>
+        <div className="space-y-1.5 pt-0.5 min-w-0 flex-1">
+          {slices.map((s, i) => (
+            <div
+              key={i}
+              className="flex items-center gap-1.5"
+              onMouseEnter={() => setHoveredIdx(i)}
+              onMouseLeave={() => setHoveredIdx(null)}
+            >
+              <div
+                className="w-2 h-2 rounded-full flex-shrink-0"
+                style={{
+                  backgroundColor: s.color,
+                  opacity: hoveredIdx == null || hoveredIdx === i ? 1 : 0.3,
+                }}
+              />
+              <span className="text-[10px] text-gray-500 dark:text-gray-400 truncate flex-1 min-w-0">
+                {s.label}
+              </span>
+              <span className="text-[10px] font-semibold text-gray-700 dark:text-gray-300 flex-shrink-0 tabular-nums">
+                {formatCount(s.count)}
+              </span>
+              <span className="text-[10px] text-gray-400 flex-shrink-0 tabular-nums">
+                {s.pct}%
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NodeDetail({
+  node,
+  graph,
+  isDark = false,
+}: {
+  node: GraphNode;
+  graph: ProcessGraphType | null;
+  isDark?: boolean;
+}) {
   const incomingEdges = graph?.edges.filter((e) => e.target === node.id && e.source !== node.id) ?? [];
   const outgoingEdges = graph?.edges.filter((e) => e.source === node.id && e.target !== node.id) ?? [];
   const selfLoop = graph?.edges.find((e) => e.source === node.id && e.target === node.id);
@@ -713,6 +1056,23 @@ function NodeDetail({ node, graph }: { node: GraphNode; graph: ProcessGraphType 
           <DetailRow label="Self-loop" value={`${formatCount(selfLoop.count)} times`} />
         )}
       </div>
+
+      {(incomingEdges.length > 0 || outgoingEdges.length > 0) && (
+        <div className="space-y-4">
+          <NodeFlowChart
+            edges={incomingEdges}
+            title="Incoming"
+            labelKey="source"
+            isDark={isDark}
+          />
+          <NodeFlowChart
+            edges={outgoingEdges}
+            title="Outgoing"
+            labelKey="target"
+            isDark={isDark}
+          />
+        </div>
+      )}
 
       {incomingEdges.length > 0 && (
         <div>
