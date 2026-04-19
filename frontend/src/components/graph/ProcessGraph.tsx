@@ -18,7 +18,7 @@ try {
 // ── Stylesheet (dark-mode aware) ───────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildStylesheet(isDark: boolean): any[] {
+function buildStylesheet(isDark: boolean, showSynthetic: boolean): any[] {
   const nodeBg        = isDark ? "#1E293B" : "#FFFFFF";
   const nodeBorder    = isDark ? "#3B82F6" : "#60A5FA";
   const nodeText      = isDark ? "#E2E8F0" : "#1F2937";
@@ -89,7 +89,9 @@ function buildStylesheet(isDark: boolean): any[] {
         "line-color": edgeLine,
         "target-arrow-color": edgeLine,
         "target-arrow-shape": "triangle",
-        "curve-style": "bezier",
+        "curve-style": "unbundled-bezier",
+        "control-point-distances": "data(controlPointDistance)",
+        "control-point-weights": 0.5,
         width: "data(lineWidth)",
         label: "data(label)",
         "font-size": "10px",
@@ -108,17 +110,6 @@ function buildStylesheet(isDark: boolean): any[] {
         color: isDark ? "#93C5FD" : "#1D4ED8",
       },
     },
-    // Happy path — most-frequent complete variant (amber)
-    {
-      selector: "edge.happy-path",
-      style: {
-        "line-color": isDark ? "#D97706" : "#F59E0B",
-        "target-arrow-color": isDark ? "#D97706" : "#F59E0B",
-        color: isDark ? "#FCD34D" : "#92400E",
-        "text-background-color": isDark ? "#1E293B" : "#FFFBEB",
-        "text-background-opacity": edgeBgOpacity,
-      },
-    },
     // Self-loop edges (red)
     {
       selector: "edge.loop-edge",
@@ -131,56 +122,138 @@ function buildStylesheet(isDark: boolean): any[] {
         "text-background-opacity": edgeBgOpacity,
       },
     },
+    // Synthetic edges — dashed and muted (curvature inherited from base edge rule)
     {
-      selector: "edge.happy-path:selected, edge.loop-edge:selected",
+      selector: "edge.synthetic-edge",
+      style: {
+        "line-style": "dashed",
+        "line-dash-pattern": [6, 4],
+        "line-color": isDark ? "#334155" : "#cbd5e1",
+        "target-arrow-color": isDark ? "#334155" : "#cbd5e1",
+        color: isDark ? "#475569" : "#94a3b8",
+        "text-background-color": isDark ? "#0f172a" : "#f8fafc",
+      },
+    },
+    // Synthetic start/end nodes — dashed border, muted italic text
+    {
+      selector: "node.synthetic-node",
+      style: {
+        "background-color": isDark ? "#0f172a" : "#f8fafc",
+        "border-style": "dashed",
+        "border-color": isDark ? "#475569" : "#94a3b8",
+        "border-width": 1.5,
+        color: isDark ? "#64748b" : "#94a3b8",
+        "font-style": "italic",
+      },
+    },
+    {
+      selector: "edge.loop-edge:selected",
       style: {
         "line-color": isDark ? "#60A5FA" : "#3B82F6",
         "target-arrow-color": isDark ? "#60A5FA" : "#3B82F6",
         color: isDark ? "#93C5FD" : "#1D4ED8",
       },
     },
+    // Hide synthetic nodes/edges without remounting (display:none keeps positions stable)
+    ...(!showSynthetic
+      ? [{ selector: "node.synthetic-node, edge.synthetic-edge", style: { display: "none" } }]
+      : []),
   ];
 }
 
 // ── Layout config ──────────────────────────────────────────────────────────
 
 const LAYOUT = {
-  name: "dagre",
-  rankDir: "LR",
-  nodeSep: 40,
-  rankSep: 110,
-  edgeSep: 12,
-  padding: 50,
+  name: "preset",
   fit: true,
+  padding: 50,
   animate: false,
-  ranker: "tight-tree",
 };
+
+// ── Layout constants ───────────────────────────────────────────────────────
+// Activities sit on a horizontal row (y = 0), ordered by avg_position.
+// Synthetic Start is placed below-left; Synthetic End is above-right.
+const ACT_STEP = 400;   // horizontal spacing between activity centres
+const DIAG_X   = 260;   // horizontal offset of Start/End from the nearest activity
+const DIAG_Y   = 260;   // vertical offset (y-down: Start is +y below, End is −y above)
 
 // ── Element builders ───────────────────────────────────────────────────────
 
+const SYNTHETIC_PREFIX = "[Synthetic]";
+
 function buildElements(
   graph: ProcessGraphData,
-  happyPathEdgeIds: Set<string>,
-  loopEdgeIds: Set<string>
+  loopEdgeIds: Set<string>,
+  activityOrder: string[]
 ): ElementDefinition[] {
-  const maxEdgeCount = Math.max(...graph.edges.map((e) => e.count), 1);
+  // ── Node positions (preset layout) ────────────────────────────────────────
+  // Regular nodes are ordered by the user-defined activityOrder when provided,
+  // falling back to avg_position for any nodes not in that list.
+  const regularNodes = [...graph.nodes]
+    .filter((n) => !n.id.startsWith(SYNTHETIC_PREFIX))
+    .sort((a, b) => {
+      const ai = activityOrder.indexOf(a.id);
+      const bi = activityOrder.indexOf(b.id);
+      if (ai !== -1 && bi !== -1) return ai - bi;
+      if (ai !== -1) return -1;
+      if (bi !== -1) return 1;
+      return a.avg_position - b.avg_position;
+    });
+
+  const nodePositions: Record<string, { x: number; y: number }> = {};
+
+  // Activities: flat horizontal row at y = 0, ordered by avg_position
+  regularNodes.forEach((node, i) => {
+    nodePositions[node.id] = { x: ACT_STEP * i, y: 0 };
+  });
+
+  const lastIdx = Math.max(regularNodes.length - 1, 0);
+  // Synthetic Start: below-left of the first activity
+  nodePositions[`${SYNTHETIC_PREFIX} Start`] = { x: -DIAG_X, y: DIAG_Y };
+  // Synthetic End: above-right of the last activity
+  nodePositions[`${SYNTHETIC_PREFIX} End`]   = { x: lastIdx * ACT_STEP + DIAG_X, y: -DIAG_Y };
+
+  // ── Forward-adjacent pairs — straight edges only from activity[i] → activity[i+1]
+  const forwardAdjacentPairs = new Set<string>();
+  for (let i = 0; i < regularNodes.length - 1; i++) {
+    forwardAdjacentPairs.add(`${regularNodes[i].id}|||${regularNodes[i + 1].id}`);
+  }
+
+  // ── Edge frequency scale (exclude synthetic edges) ────────────────────────
+  // An edge is synthetic if either its source or target is a synthetic node.
+  const isSyntheticEdgeFn = (edge: ProcessGraphData["edges"][number]) =>
+    edge.source.startsWith(SYNTHETIC_PREFIX) || edge.target.startsWith(SYNTHETIC_PREFIX);
+
+  const regularEdges = graph.edges.filter((e) => !isSyntheticEdgeFn(e));
+  const maxEdgeCount = Math.max(...regularEdges.map((e) => e.count), 1);
+
+  // ── Effective node count: max(inflow, outflow) ────────────────────────────
+  const inflow: Record<string, number> = {};
+  const outflow: Record<string, number> = {};
+  for (const edge of graph.edges) {
+    inflow[edge.target]  = (inflow[edge.target]  ?? 0) + edge.count;
+    outflow[edge.source] = (outflow[edge.source] ?? 0) + edge.count;
+  }
 
   const nodes: ElementDefinition[] = graph.nodes.map((node) => {
+    const effectiveCount = Math.max(inflow[node.id] ?? 0, outflow[node.id] ?? 0);
     const nodeWidth = Math.max(80, Math.min(170, node.label.length * 8 + 32));
-    const cls =
-      node.is_start && node.is_end
-        ? "start-end-node"
-        : node.is_start
-        ? "start-node"
-        : node.is_end
-        ? "end-node"
-        : "";
+    const isSynthetic = node.id.startsWith(SYNTHETIC_PREFIX);
+    const cls = isSynthetic
+      ? "synthetic-node"
+      : node.is_start && node.is_end
+      ? "start-end-node"
+      : node.is_start
+      ? "start-node"
+      : node.is_end
+      ? "end-node"
+      : "";
 
     return {
       data: {
         id: node.id,
-        label: `${node.label}\n${formatCount(node.count)}`,
-        count: node.count,
+        label: `${node.label}\n${formatCount(effectiveCount)}`,
+        count: effectiveCount,
         avg_duration_before_ms: node.avg_duration_before_ms,
         avg_position: node.avg_position,
         is_start: node.is_start,
@@ -189,18 +262,33 @@ function buildElements(
         textMaxWidth: `${nodeWidth - 12}px`,
       },
       classes: cls,
+      position: nodePositions[node.id] ?? { x: 0, y: 0 },
     };
   });
 
   const edges: ElementDefinition[] = graph.edges.map((edge) => {
-    const relFreq = edge.count / maxEdgeCount;
+    const isSyntheticEdge = isSyntheticEdgeFn(edge);
+    const relFreq = isSyntheticEdge ? 0 : edge.count / maxEdgeCount;
     const lineWidth = 1.5 + relFreq * 7;
     const classes = [
-      happyPathEdgeIds.has(edge.id) && "happy-path",
+      isSyntheticEdge && "synthetic-edge",
       loopEdgeIds.has(edge.id) && "loop-edge",
     ]
       .filter(Boolean)
       .join(" ");
+
+    // Distance-proportional curvature applied to every edge.
+    // Positive = arc bows left of the source→target direction (upward for left-to-right edges).
+    // Edges going TO [Synthetic] End are negated so they fan in the opposite direction,
+    // creating a mirrored spread that visually balances the Start fan.
+    const src = nodePositions[edge.source] ?? { x: 0, y: 0 };
+    const tgt = nodePositions[edge.target] ?? { x: 0, y: 0 };
+    const edgeDist = Math.hypot(tgt.x - src.x, tgt.y - src.y);
+    const isEndEdge = edge.target === `${SYNTHETIC_PREFIX} End`;
+    const isForwardAdjacent = forwardAdjacentPairs.has(`${edge.source}|||${edge.target}`);
+    const controlPointDistance = isForwardAdjacent
+      ? 0
+      : Math.round(edgeDist * 0.3 * (isEndEdge ? -1 : 1));
 
     return {
       data: {
@@ -212,6 +300,7 @@ function buildElements(
         avg_duration_ms: edge.avg_duration_ms,
         frequency_ratio: edge.frequency_ratio,
         lineWidth,
+        controlPointDistance,
       },
       classes,
     };
@@ -226,8 +315,10 @@ interface ProcessGraphProps {
   graph: ProcessGraphData;
   selectedElement: SelectedElement;
   onSelectElement: (el: SelectedElement) => void;
-  happyPathEdgeIds?: Set<string>;
   loopEdgeIds?: Set<string>;
+  activityOrder?: string[];
+  showSynthetic?: boolean;
+  resetLayoutKey?: number;
   isDark?: boolean;
 }
 
@@ -242,8 +333,10 @@ export function ProcessGraph({
   graph,
   selectedElement,
   onSelectElement,
-  happyPathEdgeIds = new Set(),
   loopEdgeIds = new Set(),
+  activityOrder = [],
+  showSynthetic = true,
+  resetLayoutKey = 0,
   isDark = false,
 }: ProcessGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -264,6 +357,36 @@ export function ProcessGraph({
   const loopEdgeIdsRef = useRef(loopEdgeIds);
   useEffect(() => { loopEdgeIdsRef.current = loopEdgeIds; }, [loopEdgeIds]);
 
+  // Always-current ref to the live Cytoscape instance — used by the reset effect
+  // to avoid racing with instance teardown when graphKey changes simultaneously.
+  const cyRef = useRef<cytoscape.Core | null>(null);
+  useEffect(() => { cyRef.current = cyInstance; }, [cyInstance]);
+
+  // Default node positions computed by buildElements — kept in a ref so the
+  // reset effect can read them without being in their dependency array.
+  const defaultPositionsRef = useRef<Record<string, { x: number; y: number }>>({});
+
+  // Reset node positions and edge curvatures when the parent increments resetLayoutKey.
+  // Depends only on resetLayoutKey so it never races with Cytoscape remounts triggered
+  // by activityOrder / topology changes.
+  useEffect(() => {
+    if (!resetLayoutKey) return; // skip initial value of 0
+    const cy = cyRef.current;
+    if (!cy) return;
+    cy.batch(() => {
+      cy.nodes().forEach((node) => {
+        const pos = defaultPositionsRef.current[node.id()];
+        if (pos) node.position({ x: pos.x, y: pos.y });
+      });
+      // Remove all inline curvature overrides — stylesheet data(controlPointDistance)
+      // takes over and restores the originally-computed default curvature per edge.
+      cy.edges().removeStyle("curve-style control-point-distances");
+    });
+    edgeCurvaturesRef.current = {};
+    cy.fit(undefined, 50);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resetLayoutKey]);
+
   // Stable lookup maps
   const nodeMap = useMemo(
     () => Object.fromEntries(graph.nodes.map((n) => [n.id, n])),
@@ -274,20 +397,32 @@ export function ProcessGraph({
     [graph.edges]
   );
 
-  // Remount Cytoscape when the graph topology changes
+  // Remount Cytoscape when topology or activity order changes
   const graphKey = useMemo(
-    () => graph.nodes.map((n) => n.id).sort().join("|"),
-    [graph.nodes]
+    () => graph.nodes.map((n) => n.id).sort().join("|") + "|" + activityOrder.join(","),
+    [graph.nodes, activityOrder]
   );
 
   const elements = useMemo(
-    () => buildElements(graph, happyPathEdgeIds, loopEdgeIds),
+    () => buildElements(graph, loopEdgeIds, activityOrder),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [graph, happyPathEdgeIds, loopEdgeIds]
+    [graph, loopEdgeIds, activityOrder]
   );
 
+  // Capture default positions every time elements are recomputed so that
+  // the reset effect always restores the correct computed-default positions.
+  useEffect(() => {
+    const positions: Record<string, { x: number; y: number }> = {};
+    for (const el of elements) {
+      if (el.position && el.data && !el.data.source) {
+        positions[el.data.id as string] = { x: el.position.x, y: el.position.y };
+      }
+    }
+    defaultPositionsRef.current = positions;
+  }, [elements]);
+
   // Re-build stylesheet when dark mode toggles
-  const stylesheet = useMemo(() => buildStylesheet(isDark), [isDark]);
+  const stylesheet = useMemo(() => buildStylesheet(isDark, showSynthetic), [isDark, showSynthetic]);
 
   // ── Event handlers ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -330,8 +465,9 @@ export function ProcessGraph({
       const { x, y } = getRenderedPos(evt);
       const d = (evt.target as cytoscape.EdgeSingular).data();
       setTooltip({ x, y, type: "edge", data: d });
-      // Show grab cursor for draggable (non-loop) edges
-      if (domContainer && !dragRef.current && !loopEdgeIdsRef.current.has(d.id as string)) {
+      // Show grab cursor for draggable (non-loop, non-synthetic) edges
+      const edgeEl = evt.target as cytoscape.EdgeSingular;
+      if (domContainer && !dragRef.current && !loopEdgeIdsRef.current.has(d.id as string) && !edgeEl.hasClass("synthetic-edge")) {
         domContainer.style.cursor = "grab";
       }
     };
@@ -346,6 +482,7 @@ export function ProcessGraph({
       const edge = evt.target as cytoscape.EdgeSingular;
       const edgeId = edge.id();
       if (loopEdgeIdsRef.current.has(edgeId)) return;
+      if (edge.hasClass("synthetic-edge")) return;
 
       const src = edge.source().renderedPosition();
       const tgt = edge.target().renderedPosition();
@@ -373,6 +510,7 @@ export function ProcessGraph({
       const edge = evt.target as cytoscape.EdgeSingular;
       const edgeId = edge.id();
       if (loopEdgeIdsRef.current.has(edgeId)) return;
+      if (edge.hasClass("synthetic-edge")) return;
       delete edgeCurvaturesRef.current[edgeId];
       edge.removeStyle("curve-style control-point-distances");
     };
@@ -442,7 +580,7 @@ export function ProcessGraph({
     };
   }, [cyInstance]);
 
-  // Sync external selectedElement to Cytoscape selection
+// Sync external selectedElement to Cytoscape selection
   useEffect(() => {
     if (!cyInstance) return;
     cyInstance.elements().unselect();
@@ -465,8 +603,7 @@ export function ProcessGraph({
     a.click();
   };
 
-  const hasHappyPath = happyPathEdgeIds.size > 0;
-  const hasLoops     = loopEdgeIds.size > 0;
+  const hasLoops = loopEdgeIds.size > 0;
 
   // Shared dark-aware class helpers for overlay panels
   const panelCls = isDark
@@ -534,12 +671,6 @@ export function ProcessGraph({
           </div>
           <span className={cn("text-[10px]", labelCls)}>Edge frequency</span>
         </div>
-        {hasHappyPath && (
-          <div className="flex items-center gap-2">
-            <div className={cn("h-1.5 w-10 rounded flex-shrink-0", isDark ? "bg-amber-600" : "bg-amber-400")} />
-            <span className={cn("text-[10px]", labelCls)}>Happy path</span>
-          </div>
-        )}
         {hasLoops && (
           <div className="flex items-center gap-2">
             <div className={cn("h-1.5 w-10 rounded flex-shrink-0", isDark ? "bg-red-600" : "bg-red-400")} />

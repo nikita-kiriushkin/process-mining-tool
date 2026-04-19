@@ -124,8 +124,9 @@ backend/
   api/routes/upload.py             POST /api/upload
   api/routes/process.py            POST /api/process + min_edge_frequency post-filter
   api/schemas/process.py           Pydantic schemas (ColumnMapping, ProcessRequest, ProcessResponse, …)
+                                   GraphNode gains start_count + end_count
   core/parser.py                   CSV parsing + validation
-  core/miner.py                    DFG construction + metrics
+  core/miner.py                    DFG construction + metrics (start_count, end_count per node)
   core/variants.py                 Variant extraction
   core/filters.py                  Filter application (case_id, date, activity, dimension, variant)
   tests/                           17 passing tests
@@ -133,10 +134,12 @@ backend/
 frontend/src/
   app/upload/page.tsx              Upload wizard page
   app/map/page.tsx                 Column mapping page
-  app/explore/page.tsx             Explorer: FilterPanel (with ResizeHandle, collapsible FilterSection,
-                                   case ID filter), graph, DetailPanel (edge case IDs + copy), VariantsTable
+  app/explore/page.tsx             Explorer: FilterPanel, graph, DetailPanel, VariantsTable
+                                   graphWithSynthetic useMemo (synthetic Start/End nodes + edges)
+                                   NodeFlowChart (SVG donut), NodeDetail incoming/outgoing charts
   components/graph/ProcessGraph.tsx  Cytoscape graph — edge curvature drag, dynamic stylesheet, happy path,
-                                   loop edges, dark mode
+                                   loop edges, dark mode, synthetic-node/synthetic-edge styles,
+                                   effectiveCount = max(inflow, outflow)
   components/upload/FileDropzone.tsx Drag-drop upload
   components/upload/ColumnMapper.tsx Column mapping — positional defaults (col[0]=case_id, col[1]=activity, col[2]=timestamp)
   components/upload/StepIndicator.tsx Wizard step progress
@@ -215,6 +218,104 @@ Backend API docs: http://localhost:8000/docs
 - `ALIASES` constant removed (no longer used)
 - Alias detection was heuristic and often wrong for arbitrary CSVs; positional default is more predictable
 
+### Step 17 — Incoming/outgoing pie charts in detail panel ✅ (branch BIBKPLY-2168)
+- `NodeFlowChart` SVG donut chart added to `explore/page.tsx` (no external deps)
+- Two instances in `NodeDetail`: **Incoming** (blues/oranges palette) and **Outgoing** (same `FLOW_COLORS` palette, offset by number of extra items)
+- Each slice is proportional to edge `count`; hovering dims other slices to 30% opacity
+- Legend shows absolute case count + percentage per slice with `tabular-nums`
+- Single-segment edge case handled by clamping arc span to `2π − 0.001` so SVG endpoints never coincide
+- `isDark` threaded from `ExplorePage` → `DetailPanel` → `NodeDetail` → `NodeFlowChart` for correct SVG text colours
+- `FLOW_COLORS` palette: 8 perceptually distinct hues (blue, orange, violet, emerald, pink, yellow, sky, red)
+- `GraphNode` schema (`backend/api/schemas/process.py`) gains `start_count: int = 0`
+- `miner.py` populates `start_count` from the already-computed `start_counts` Series
+
+### Step 18 — Synthetic Start / End nodes + node count recalculation ✅ (branch BIBKPLY-2168)
+- `GraphNode` schema gains `end_count: int = 0`; `miner.py` populates it from `end_counts` Series
+- `graphWithSynthetic` useMemo in `ExplorePage` builds an augmented graph (never sent to backend):
+  - Prepends `[Synthetic] Start` node with one edge per start activity (`count = node.start_count`)
+  - Appends `[Synthetic] End` node with one edge per end activity (`count = node.end_count`)
+  - Passed to both `ProcessGraph` and `DetailPanel` so detail-panel charts show synthetic edges too
+- Every activity now has balanced inflow = outflow; the detail panel's Incoming chart for start activities shows `[Synthetic] Start` as a source instead of the old "New cases" special slice
+- `ProcessGraph.tsx` — `buildElements` updated:
+  - `effectiveCount = max(inflow, outflow)` — handles synthetic Start (outflow only) and End (inflow only) correctly; `+ start_count` removed (synthetic edges carry it)
+  - `maxEdgeCount` computed from non-synthetic edges only so synthetic edges don't compress the regular edge thickness scale
+  - `SYNTHETIC_PREFIX = "[Synthetic]"` used to detect synthetic nodes/edges and assign `synthetic-node` / `synthetic-edge` CSS classes
+- Stylesheet additions: `synthetic-node` (dashed border, italic text, muted colour) and `synthetic-edge` (dashed line, muted colour) — both dark-mode aware
+- Min-edge-frequency filter recalculates displayed node counts: when edges are removed, node labels reflect only the visible inflow; synthetic edges are always present and unaffected by the filter
+
+### Step 19 — Horizontal preset layout + distance-proportional edge curvature ✅ (branch BIBKPLY-2168)
+- Layout switched from dagre to `preset` with manually computed positions:
+  - Regular activity nodes: flat horizontal row at `y = 0`, spaced `ACT_STEP = 400px` apart, ordered by `avg_position`
+  - `[Synthetic] Start`: `{ x: -260, y: +260 }` (below-left of first activity)
+  - `[Synthetic] End`: `{ x: lastIdx * 400 + 260, y: -260 }` (above-right of last activity)
+- All edges use `curve-style: unbundled-bezier` with `control-point-distances: data(controlPointDistance)`
+- Curvature is distance-proportional (`edgeDist * 0.3`), negated for edges going to `[Synthetic] End` so they fan symmetrically inward
+- Forward-adjacent pairs (activity[i] → activity[i+1] in order) get `controlPointDistance = 0` (straight lines); all other edges get curvature
+- Happy path feature removed entirely (was previously amber edges from top variant)
+- Synthetic nodes/edges hidden via `display: none` in Cytoscape stylesheet (not by changing the graph prop) so toggling visibility does not trigger a remount or reset the layout
+- `graphWithSynthetic` is always passed to `ProcessGraph`; the `showSynthetic` flag only controls the stylesheet rule
+- `graphKey` includes `activityOrder.join(",")` so changing activity order forces a remount with recomputed positions
+
+### Step 20 — Pinned colours for special nodes in pie charts ✅ (branch BIBKPLY-2168)
+- `PINNED_COLORS` map in `explore/page.tsx`:
+  - `[Synthetic] Start` → `#94a3b8` (slate-400)
+  - `[Synthetic] End` → `#64748b` (slate-500)
+  - `Lost` → `#f87171` (red-400)
+- `NodeFlowChart` assigns pinned colours before advancing the palette index, so unpinned activities get consistent positions in `FLOW_COLORS` regardless of how many pinned items appear
+
+### Step 21 — Activity order drag-and-drop section ✅ (branch BIBKPLY-2168)
+- `ActivityOrderList` component in `explore/page.tsx` — HTML5 drag-and-drop list of activity names
+  - Live reorder during drag (`onDragOver`); commits to parent only on `onDragEnd`
+  - Shows avg position % next to each item as a guide
+  - "Reset to default" button appears when order differs from `defaultActivityOrder`
+- `defaultActivityOrder` in `ExplorePage`: activities sorted by `avg_position`, recomputed when `data` changes
+- `customActivityOrder` state: `null` = use default, otherwise the user-defined array; reset to `null` whenever `data` changes (new filter response)
+- `activityOrder = customActivityOrder ?? defaultActivityOrder` passed to both `ProcessGraph` and `ActivityOrderList`
+- Changing the order remounts Cytoscape (via `graphKey`) with positions recomputed from the new order
+
+### Step 22 — Configuration panel redesign ✅ (branch BIBKPLY-2168)
+- Left panel header renamed from "Filters" to "Configuration"
+- `FilterPanel` split into two visual subsections using full-width background strips (`-mx-4 px-4 py-2 bg-gray-50`):
+  - **Display Settings**: Show synthetic checkbox + Reset layout button + Activity Order list
+  - **Filters**: Case IDs, Date Range, Activities, Min Edge Frequency, Variants, Dimension filters, Reset Filters button
+- `FilterSection` component redesigned: removed `mb-4 pb-4` (which left large gaps when collapsed); now uses `border-b border-gray-100` as separator and `py-2.5` on the header button so collapsed sections are compact; content wrapped in `<div className="pb-3">` only when open
+- Subsection headers visually distinct from `FilterSection` titles (full-width tinted strip vs inline label)
+
+### Step 23 — Reset layout button ✅ (branch BIBKPLY-2168)
+- "Reset layout" button in the Display Settings section resets both node positions and edge curvatures
+- `onResetLayout` in `ExplorePage` calls `setResetLayoutKey((k) => k + 1)`
+- `ProcessGraph` now implements `resetLayoutKey` properly:
+  - `cyRef` (ref, always holds the live Cytoscape instance) — avoids racing with instance teardown when `graphKey` also changes
+  - `defaultPositionsRef` (ref, populated via `useEffect([elements])`) — always holds the latest computed default positions from `buildElements`
+  - `useEffect([resetLayoutKey])` — fires only when the button is clicked; imperatively restores all node positions from `defaultPositionsRef` via `cy.batch()`, clears `edgeCurvaturesRef`, removes all inline `curve-style`/`control-point-distances` styles (stylesheet `data(controlPointDistance)` takes over), then calls `cy.fit()`
+- Skips when `resetLayoutKey === 0` (initial render)
+
+### Bug fix — activity order reset on Min Edge Frequency change ✅ (branch BIBKPLY-2168)
+- **Symptom:** dragging activities to a custom order in the left panel, then adjusting the Min Edge Frequency slider, caused the panel order to snap back to the default (avg_position) sort.
+- **Root cause (two-part):**
+  1. `useEffect(() => { setCustomActivityOrder(null); }, [data])` — fired on every `data` change, including edge-only filter changes that leave the node set identical.
+  2. Even after guarding by comparing node IDs, the guard itself was flawed: TanStack Query sets `data = undefined` while a new fetch is in-flight (each unique filter combination is a separate cache key). During that loading window `data?.graph.nodes ?? []` evaluated to `[]`, producing `ids = ""`, which didn't match the stored ID string → `setCustomActivityOrder(null)` fired before the new response arrived.
+- **Fix:** `explore/page.tsx` — the `useEffect` now:
+  1. Returns early when `data` is `undefined` (loading phase).
+  2. Computes a sorted node-ID fingerprint and only calls `setCustomActivityOrder(null)` when the fingerprint changes — i.e. when activities are actually added or removed (activity exclusion, variant filter), not when only edge data changes.
+
+---
+
+## Layout / graph constants (current)
+
+```ts
+const ACT_STEP = 400;          // px between activity node centres (horizontal)
+const DIAG_X   = 260;          // horizontal offset of synthetic Start/End
+const DIAG_Y   = 260;          // vertical offset (Start is +y below row, End is -y above row)
+const SYNTHETIC_PREFIX = "[Synthetic]";
+const LAYOUT = { name: "preset", fit: true, padding: 50, animate: false };
+```
+
+`graphKey` (controls Cytoscape remount):
+```ts
+graph.nodes.map(n => n.id).sort().join("|") + "|" + activityOrder.join(",")
+```
+
 ---
 
 ## Possible next steps
@@ -222,5 +323,4 @@ Backend API docs: http://localhost:8000/docs
 - Add backend tests for `filters.py` (currently only miner/parser/variants are tested)
 - Persist `sessionId` + `columnMapping` in `localStorage` so page refresh doesn't lose state
 - Add a `generate_sample_data.py` script to produce synthetic event logs of configurable size
-- Add a graph layout toggle (LR ↔ TB) — one-line `rankDir` change in dagre layout config
 - Deploy: add Caddy/Nginx reverse proxy to `docker-compose.yml` for a one-command VPS deploy
