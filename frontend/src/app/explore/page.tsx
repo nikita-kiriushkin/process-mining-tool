@@ -10,6 +10,7 @@ import { formatCount, formatDuration, formatPercent } from "@/lib/utils";
 import { useUploadStore } from "@/store/uploadStore";
 import { useExploreStore } from "@/store/exploreStore";
 import { Button } from "@/components/ui/Button";
+import { StatisticsView } from "@/components/stats/StatisticsView";
 import type {
   ColumnMapping,
   ProcessFilters,
@@ -19,6 +20,16 @@ import type {
   GraphEdge,
   ProcessGraph as ProcessGraphType,
 } from "@/lib/types";
+
+// Categorical palette — each hue is perceptually distinct
+const FLOW_COLORS = ["#60a5fa", "#fb923c", "#a78bfa", "#34d399", "#f472b6", "#facc15", "#38bdf8", "#f87171"];
+
+// Fixed colors for special nodes — always the same regardless of position in the list
+const PINNED_COLORS: Record<string, string> = {
+  "[Synthetic] Start": "#94a3b8",  // slate-400 — matches synthetic node style
+  "[Synthetic] End":   "#64748b",  // slate-500
+  "Lost":              "#f87171",  // red-400
+};
 
 // Cytoscape uses browser APIs — must be loaded client-side only
 const ProcessGraph = dynamic(
@@ -52,6 +63,9 @@ export default function ExplorePage() {
   useEffect(() => {
     if (data) setProcessData(data);
   }, [data, setProcessData]);
+
+  // Active view: process map or statistics
+  const [activeView, setActiveView] = useState<"map" | "stats">("map");
 
   // Dark mode toggle
   const [darkMode, setDarkMode] = useState(false);
@@ -87,7 +101,7 @@ export default function ExplorePage() {
 
   // Resizable panel sizes (px)
   const [filterWidth, setFilterWidth] = useState(256);
-  const [detailWidth, setDetailWidth] = useState(288);
+  const [detailWidth, setDetailWidth] = useState(320);
   const [variantsHeight, setVariantsHeight] = useState(192);
   useEffect(() => {
     document.documentElement.classList.toggle("dark", darkMode);
@@ -114,15 +128,17 @@ export default function ExplorePage() {
 
     const synStart: GraphNode = {
       id: "[Synthetic] Start", label: "[Synthetic] Start",
-      count: totalStart, start_count: 0, end_count: 0,
-      avg_duration_before_ms: null, avg_position: 0,
-      is_start: false, is_end: false,
+      count: totalStart, case_count: 0, start_count: 0, end_count: 0,
+      avg_duration_before_ms: null, median_duration_before_ms: null,
+      min_duration_before_ms: null, max_duration_before_ms: null,
+      avg_position: 0, is_start: false, is_end: false,
     };
     const synEnd: GraphNode = {
       id: "[Synthetic] End", label: "[Synthetic] End",
-      count: totalEnd, start_count: 0, end_count: 0,
-      avg_duration_before_ms: null, avg_position: 1,
-      is_start: false, is_end: false,
+      count: totalEnd, case_count: 0, start_count: 0, end_count: 0,
+      avg_duration_before_ms: null, median_duration_before_ms: null,
+      min_duration_before_ms: null, max_duration_before_ms: null,
+      avg_position: 1, is_start: false, is_end: false,
     };
 
     const startEdges: GraphEdge[] = nodes
@@ -130,20 +146,37 @@ export default function ExplorePage() {
       .map(n => ({
         id: `[Synthetic] Start→${n.id}`,
         source: "[Synthetic] Start", target: n.id,
-        count: n.start_count, avg_duration_ms: null, frequency_ratio: 0, case_ids: [],
+        count: n.start_count, avg_duration_ms: null, median_duration_ms: null,
+        min_duration_ms: null, max_duration_ms: null, frequency_ratio: 0, case_ids: [],
+        dimension_counts: {}, dimension_durations: {},
       }));
     const endEdges: GraphEdge[] = nodes
       .filter(n => n.end_count > 0)
       .map(n => ({
         id: `${n.id}→[Synthetic] End`,
         source: n.id, target: "[Synthetic] End",
-        count: n.end_count, avg_duration_ms: null, frequency_ratio: 0, case_ids: [],
+        count: n.end_count, avg_duration_ms: null, median_duration_ms: null,
+        min_duration_ms: null, max_duration_ms: null, frequency_ratio: 0, case_ids: [],
+        dimension_counts: {}, dimension_durations: {},
       }));
 
     return {
       nodes: [synStart, ...nodes, synEnd],
       edges: [...startEdges, ...data.graph.edges, ...endEdges],
     };
+  }, [data]);
+
+  // Stable color map: one color per dimension value, consistent across all edges
+  const dimensionColors = useMemo((): Record<string, Record<string, string>> => {
+    if (!data) return {};
+    const result: Record<string, Record<string, string>> = {};
+    for (const [dim, values] of Object.entries(data.available_dimensions)) {
+      result[dim] = {};
+      [...values].sort().forEach((val, idx) => {
+        result[dim][val] = FLOW_COLORS[idx % FLOW_COLORS.length];
+      });
+    }
+    return result;
   }, [data]);
 
   if (!sessionId || !columnMapping.case_id) return null;
@@ -163,6 +196,22 @@ export default function ExplorePage() {
           <>
             <div className="h-5 w-px bg-gray-200 dark:bg-gray-600" />
             <SummaryChips data={data} />
+            <div className="h-5 w-px bg-gray-200 dark:bg-gray-600" />
+            <div className="flex items-center bg-gray-100 dark:bg-gray-700 rounded-lg p-0.5">
+              {(["map", "stats"] as const).map((view) => (
+                <button
+                  key={view}
+                  onClick={() => setActiveView(view)}
+                  className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                    activeView === view
+                      ? "bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm font-semibold"
+                      : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                  }`}
+                >
+                  {view === "map" ? "Process Map" : "Statistics"}
+                </button>
+              ))}
+            </div>
           </>
         )}
 
@@ -229,45 +278,60 @@ export default function ExplorePage() {
             />
           )}
           {data && (
-            <div className="flex-1 flex flex-col overflow-hidden">
-              <div className="flex-1 relative min-h-0">
-                <ProcessGraph
-                  graph={graphWithSynthetic!}
-                  selectedElement={selectedElement}
-                  onSelectElement={setSelectedElement}
-                  loopEdgeIds={loopEdgeIds}
-                  activityOrder={activityOrder}
-                  showSynthetic={showSynthetic}
-                  resetLayoutKey={resetLayoutKey}
-                  isDark={darkMode}
-                />
-              </div>
-              <ResizeHandle
-                direction="horizontal"
-                onDelta={(d) => setVariantsHeight((h) => Math.max(80, Math.min(400, h - d)))}
-              />
+            <>
+              {/* Process map — always mounted so Cytoscape state (curvature etc.) survives
+                  tab switches; hidden via display:none when Statistics is active. */}
               <div
-                style={{ height: variantsHeight }}
-                className="flex-shrink-0 overflow-y-auto bg-white dark:bg-gray-800"
+                className="flex-1 flex flex-col overflow-hidden"
+                style={{ display: activeView === "map" ? "flex" : "none" }}
               >
-                <VariantsTable variants={data.variants} />
+                <div className="flex-1 relative min-h-0">
+                  <ProcessGraph
+                    graph={graphWithSynthetic!}
+                    selectedElement={selectedElement}
+                    onSelectElement={setSelectedElement}
+                    loopEdgeIds={loopEdgeIds}
+                    activityOrder={activityOrder}
+                    showSynthetic={showSynthetic}
+                    resetLayoutKey={resetLayoutKey}
+                    isDark={darkMode}
+                  />
+                </div>
+                <ResizeHandle
+                  direction="horizontal"
+                  onDelta={(d) => setVariantsHeight((h) => Math.max(80, Math.min(400, h - d)))}
+                />
+                <div
+                  style={{ height: variantsHeight }}
+                  className="flex-shrink-0 overflow-y-auto bg-white dark:bg-gray-800"
+                >
+                  <VariantsTable variants={data.variants} />
+                </div>
               </div>
-            </div>
+
+              {/* Statistics view */}
+              {activeView === "stats" && (
+                <StatisticsView data={data} isDark={darkMode} />
+              )}
+            </>
           )}
         </main>
 
-        <ResizeHandle
-          direction="vertical"
-          onDelta={(d) => setDetailWidth((w) => Math.max(200, Math.min(500, w - d)))}
-        />
-
-        {/* ── Detail panel ── */}
-        <aside
-          style={{ width: detailWidth }}
-          className="flex-shrink-0 bg-white dark:bg-gray-800 overflow-y-auto"
-        >
-          <DetailPanel selectedElement={selectedElement} graph={graphWithSynthetic} isDark={darkMode} />
-        </aside>
+        {activeView === "map" && (
+          <>
+            <ResizeHandle
+              direction="vertical"
+              onDelta={(d) => setDetailWidth((w) => Math.max(200, Math.min(500, w - d)))}
+            />
+            {/* ── Detail panel ── */}
+            <aside
+              style={{ width: detailWidth }}
+              className="flex-shrink-0 bg-white dark:bg-gray-800 overflow-y-auto"
+            >
+              <DetailPanel selectedElement={selectedElement} graph={graphWithSynthetic} isDark={darkMode} dimensionColors={dimensionColors} />
+            </aside>
+          </>
+        )}
       </div>
     </div>
   );
@@ -468,6 +532,30 @@ function FilterPanel({ data, filters, setFilters, resetFilters, showSynthetic, o
           </p>
         </div>
 
+        {/* ── Min edge frequency ── */}
+        {maxEdge > 1 && (
+          <FilterSection title="Min Edge Frequency">
+            <div className="space-y-2">
+              <input
+                type="range"
+                min={1}
+                max={maxEdge}
+                step={1}
+                value={minFreq}
+                className="w-full h-1.5 accent-blue-600 cursor-pointer"
+                onChange={(e) => setMinFreq(Number(e.target.value))}
+                onMouseUp={(e) => commitSlider(Number((e.target as HTMLInputElement).value))}
+                onTouchEnd={(e) => commitSlider(Number((e.target as HTMLInputElement).value))}
+              />
+              <div className="flex justify-between text-[10px] text-gray-400">
+                <span>1</span>
+                <span className="text-blue-600 font-semibold">{minFreq}×</span>
+                <span>{maxEdge}</span>
+              </div>
+            </div>
+          </FilterSection>
+        )}
+
         {/* ── Case IDs ── */}
         <FilterSection title="Case IDs">
           <textarea
@@ -543,30 +631,6 @@ function FilterPanel({ data, filters, setFilters, resetFilters, showSynthetic, o
             <p className="text-[10px] text-amber-600 mt-1.5">{excluded.size} excluded</p>
           )}
         </FilterSection>
-
-        {/* ── Min edge frequency ── */}
-        {maxEdge > 1 && (
-          <FilterSection title="Min Edge Frequency">
-            <div className="space-y-2">
-              <input
-                type="range"
-                min={1}
-                max={maxEdge}
-                step={1}
-                value={minFreq}
-                className="w-full h-1.5 accent-blue-600 cursor-pointer"
-                onChange={(e) => setMinFreq(Number(e.target.value))}
-                onMouseUp={(e) => commitSlider(Number((e.target as HTMLInputElement).value))}
-                onTouchEnd={(e) => commitSlider(Number((e.target as HTMLInputElement).value))}
-              />
-              <div className="flex justify-between text-[10px] text-gray-400">
-                <span>1</span>
-                <span className="text-blue-600 font-semibold">{minFreq}×</span>
-                <span>{maxEdge}</span>
-              </div>
-            </div>
-          </FilterSection>
-        )}
 
         {/* ── Variants ── */}
         {data.variants.length > 1 && (
@@ -752,7 +816,7 @@ function ActivityOrderList({
 }
 
 function FilterSection({ title, children }: { title: string; children: React.ReactNode }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   return (
     <div className="border-b border-gray-100 dark:border-gray-700 last:border-0">
       <button
@@ -830,10 +894,12 @@ function DetailPanel({
   selectedElement,
   graph,
   isDark = false,
+  dimensionColors = {},
 }: {
   selectedElement: SelectedElement;
   graph: ProcessGraphType | null;
   isDark?: boolean;
+  dimensionColors?: Record<string, Record<string, string>>;
 }) {
   return (
     <div className="p-4">
@@ -861,21 +927,11 @@ function DetailPanel({
         <NodeDetail node={selectedElement.data} graph={graph} isDark={isDark} />
       )}
       {selectedElement?.type === "edge" && (
-        <EdgeDetail edge={selectedElement.data} graph={graph} />
+        <EdgeDetail edge={selectedElement.data} graph={graph} isDark={isDark} dimensionColors={dimensionColors} />
       )}
     </div>
   );
 }
-
-// Categorical palette — each hue is perceptually distinct
-const FLOW_COLORS = ["#60a5fa", "#fb923c", "#a78bfa", "#34d399", "#f472b6", "#facc15", "#38bdf8", "#f87171"];
-
-// Fixed colors for special nodes — always the same regardless of position in the list
-const PINNED_COLORS: Record<string, string> = {
-  "[Synthetic] Start": "#94a3b8",  // slate-400 — matches synthetic node style
-  "[Synthetic] End":   "#64748b",  // slate-500
-  "Lost":              "#f87171",  // red-400
-};
 
 function NodeFlowChart({
   edges,
@@ -888,7 +944,7 @@ function NodeFlowChart({
   title: string;
   labelKey: "source" | "target";
   isDark: boolean;
-  extraItems?: { label: string; count: number; color: string }[];
+  extraItems?: { label: string; count: number; color: string; duration?: number | null }[];
 }) {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
 
@@ -896,14 +952,14 @@ function NodeFlowChart({
   // Pinned labels always get their fixed color; the palette index only advances for unpinned ones.
   let paletteIdx = extraItems.length;
   const allItems = [
-    ...extraItems,
+    ...extraItems.map((item) => ({ ...item, duration: item.duration ?? null })),
     ...edges.map((e) => {
       const label = e[labelKey];
       const pinned = PINNED_COLORS[label];
-      if (pinned) return { label, count: e.count, color: pinned };
+      if (pinned) return { label, count: e.count, color: pinned, duration: e.avg_duration_ms };
       const color = FLOW_COLORS[paletteIdx % FLOW_COLORS.length];
       paletteIdx++;
-      return { label, count: e.count, color };
+      return { label, count: e.count, color, duration: e.avg_duration_ms };
     }),
   ];
 
@@ -928,7 +984,7 @@ function NodeFlowChart({
       `A${Ri} ${Ri} 0 ${large} 0 ${CX + Ri * Math.cos(a0)} ${CY + Ri * Math.sin(a0)}`,
       "Z",
     ].join(" ");
-    return { d, label: item.label, count: item.count, pct: Math.round(frac * 100), color: item.color };
+    return { d, label: item.label, count: item.count, pct: Math.round(frac * 100), color: item.color, duration: item.duration };
   });
 
   return (
@@ -967,32 +1023,41 @@ function NodeFlowChart({
             cases
           </text>
         </svg>
-        <div className="space-y-1.5 pt-0.5 min-w-0 flex-1">
-          {slices.map((s, i) => (
-            <div
-              key={i}
-              className="flex items-center gap-1.5"
-              onMouseEnter={() => setHoveredIdx(i)}
-              onMouseLeave={() => setHoveredIdx(null)}
-            >
+        <div className="min-w-0 flex-1">
+          {/* column headers */}
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <div className="w-2 flex-shrink-0" />
+            <span className="flex-1" />
+            <span className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide w-8 text-right">Share</span>
+            <span className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide w-12 text-right">Avg time</span>
+          </div>
+          <div className="space-y-1.5">
+            {slices.map((s, i) => (
               <div
-                className="w-2 h-2 rounded-full flex-shrink-0"
-                style={{
-                  backgroundColor: s.color,
-                  opacity: hoveredIdx == null || hoveredIdx === i ? 1 : 0.3,
-                }}
-              />
-              <span className="text-[10px] text-gray-500 dark:text-gray-400 truncate flex-1 min-w-0">
-                {s.label}
-              </span>
-              <span className="text-[10px] font-semibold text-gray-700 dark:text-gray-300 flex-shrink-0 tabular-nums">
-                {formatCount(s.count)}
-              </span>
-              <span className="text-[10px] text-gray-400 flex-shrink-0 tabular-nums">
-                {s.pct}%
-              </span>
-            </div>
-          ))}
+                key={i}
+                className="flex items-center gap-1.5"
+                onMouseEnter={() => setHoveredIdx(i)}
+                onMouseLeave={() => setHoveredIdx(null)}
+              >
+                <div
+                  className="w-2 h-2 rounded-full flex-shrink-0"
+                  style={{
+                    backgroundColor: s.color,
+                    opacity: hoveredIdx == null || hoveredIdx === i ? 1 : 0.3,
+                  }}
+                />
+                <span className="text-[10px] text-gray-500 dark:text-gray-400 truncate flex-1 min-w-0">
+                  {s.label}
+                </span>
+                <span className="text-[10px] font-semibold text-gray-700 dark:text-gray-300 flex-shrink-0 tabular-nums w-8 text-right">
+                  {s.pct}%
+                </span>
+                <span className="text-[10px] text-gray-400 flex-shrink-0 tabular-nums w-12 text-right">
+                  {s.duration != null ? formatDuration(s.duration) : "—"}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -1074,56 +1139,11 @@ function NodeDetail({
         </div>
       )}
 
-      {incomingEdges.length > 0 && (
-        <div>
-          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
-            Incoming ({incomingEdges.length})
-          </p>
-          <div className="space-y-0">
-            {incomingEdges.map((e) => (
-              <div
-                key={e.id}
-                className="flex justify-between items-center py-1.5 border-t border-gray-50 dark:border-gray-700 first:border-t-0"
-              >
-                <span className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[130px]">
-                  {e.source}
-                </span>
-                <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 flex-shrink-0 ml-2">
-                  {formatCount(e.count)}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {outgoingEdges.length > 0 && (
-        <div>
-          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
-            Outgoing ({outgoingEdges.length})
-          </p>
-          <div className="space-y-0">
-            {outgoingEdges.map((e) => (
-              <div
-                key={e.id}
-                className="flex justify-between items-center py-1.5 border-t border-gray-50 dark:border-gray-700 first:border-t-0"
-              >
-                <span className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[130px]">
-                  {e.target}
-                </span>
-                <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 flex-shrink-0 ml-2">
-                  {formatCount(e.count)}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
-function EdgeDetail({ edge, graph }: { edge: GraphEdge; graph: ProcessGraphType | null }) {
+function EdgeDetail({ edge, graph, isDark = false, dimensionColors = {} }: { edge: GraphEdge; graph: ProcessGraphType | null; isDark?: boolean; dimensionColors?: Record<string, Record<string, string>> }) {
   const sourceNode = graph?.nodes.find((n) => n.id === edge.source);
   const targetNode = graph?.nodes.find((n) => n.id === edge.target);
   const [copied, setCopied] = useState(false);
@@ -1171,19 +1191,10 @@ function EdgeDetail({ edge, graph }: { edge: GraphEdge; graph: ProcessGraphType 
               {copied ? "Copied!" : "Copy all"}
             </button>
           </div>
-          <div className="space-y-0">
-            {sampleIds.map((id) => (
-              <div
-                key={id}
-                className="py-1 border-t border-gray-50 dark:border-gray-700 first:border-t-0"
-              >
-                <span className="text-xs font-mono text-gray-600 dark:text-gray-300">{id}</span>
-              </div>
-            ))}
+          <div className="text-xs font-mono text-gray-600 dark:text-gray-300 leading-relaxed break-all">
+            {sampleIds.join(", ")}
             {caseIds.length > 5 && (
-              <p className="text-[10px] text-gray-400 pt-1">
-                +{caseIds.length - 5} more
-              </p>
+              <span className="text-gray-400"> +{caseIds.length - 5} more</span>
             )}
           </div>
         </div>
@@ -1222,6 +1233,62 @@ function EdgeDetail({ edge, graph }: { edge: GraphEdge; graph: ProcessGraphType 
               />
             )}
           </div>
+        </div>
+      )}
+
+      {Object.keys(edge.dimension_counts).length > 0 && (
+        <div className="space-y-5 pt-1">
+          {Object.entries(edge.dimension_counts).map(([dim, valueCounts]) => {
+            const total = Object.values(valueCounts).reduce((s, c) => s + c, 0);
+            const durations = edge.dimension_durations?.[dim] ?? {};
+            const colors = dimensionColors[dim] ?? {};
+            const items = Object.entries(valueCounts)
+              .sort(([, a], [, b]) => b - a)
+              .map(([val, cnt]) => ({
+                label: val,
+                count: cnt,
+                color: colors[val] ?? FLOW_COLORS[0],
+                duration: durations[val] ?? null,
+              }));
+            return (
+              <div key={dim} className="space-y-2">
+                <NodeFlowChart
+                  edges={[]}
+                  title={dim.charAt(0).toUpperCase() + dim.slice(1)}
+                  labelKey="source"
+                  isDark={isDark}
+                  extraItems={items}
+                />
+                <div className="rounded-lg border border-gray-100 dark:border-gray-700 overflow-hidden">
+                  <table className="w-full text-[10px]">
+                    <thead>
+                      <tr className="border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/40">
+                        <th className="px-2 py-1.5 text-left text-gray-400 font-semibold">Value</th>
+                        <th className="px-2 py-1.5 text-right text-gray-400 font-semibold w-10">Count</th>
+                        <th className="px-2 py-1.5 text-right text-gray-400 font-semibold w-9">Share</th>
+                        <th className="px-2 py-1.5 text-right text-gray-400 font-semibold w-14">Avg time</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {items.map((item) => (
+                        <tr key={item.label} className="border-b border-gray-50 dark:border-gray-700/50 last:border-0">
+                          <td className="px-2 py-1.5">
+                            <div className="flex items-center gap-1.5">
+                              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: item.color }} />
+                              <span className="text-gray-600 dark:text-gray-300 truncate">{item.label}</span>
+                            </div>
+                          </td>
+                          <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">{formatCount(item.count)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">{Math.round(item.count / total * 100)}%</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">{item.duration != null ? formatDuration(item.duration) : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
