@@ -26,9 +26,13 @@ export interface GraphNode {
   id: string;
   label: string;
   count: number;
+  case_count: number;
   start_count: number;
   end_count: number;
   avg_duration_before_ms: number | null;
+  median_duration_before_ms: number | null;
+  min_duration_before_ms: number | null;
+  max_duration_before_ms: number | null;
   avg_position: number;
   is_start: boolean;
   is_end: boolean;
@@ -40,8 +44,13 @@ export interface GraphEdge {
   target: string;
   count: number;
   avg_duration_ms: number | null;
+  median_duration_ms: number | null;
+  min_duration_ms: number | null;
+  max_duration_ms: number | null;
   frequency_ratio: number;
   case_ids: string[];
+  dimension_counts: Record<string, Record<string, number>>;
+  dimension_durations: Record<string, Record<string, number | null>>;
 }
 
 export interface ProcessGraph {
@@ -84,6 +93,26 @@ export interface ProcessFilters {
   case_ids?: string[];
 }
 
+// ── Statistics ────────────────────────────────────────────────────────────────
+
+export interface DimensionActivityStats {
+  activity: string;
+  case_count: number;
+  pct_of_segment: number;
+  avg_duration_before_ms: number | null;
+}
+
+export interface DimensionSlice {
+  dimension: string;
+  value: string;
+  total_cases: number;
+  activities: DimensionActivityStats[];
+}
+
+export interface StatisticsData {
+  dimensional_breakdowns: DimensionSlice[];
+}
+
 // ── Process response ──────────────────────────────────────────────────────────
 
 export interface ProcessResponse {
@@ -92,6 +121,7 @@ export interface ProcessResponse {
   summary: SummaryMetrics;
   available_activities: string[];
   available_dimensions: Record<string, string[]>;
+  statistics: StatisticsData;
 }
 
 // ── Selected element (for detail panel) ──────────────────────────────────────

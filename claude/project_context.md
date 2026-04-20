@@ -124,11 +124,14 @@ backend/
   api/routes/upload.py             POST /api/upload
   api/routes/process.py            POST /api/process + min_edge_frequency post-filter
   api/schemas/process.py           Pydantic schemas (ColumnMapping, ProcessRequest, ProcessResponse, …)
-                                   GraphNode gains start_count + end_count
+                                   GraphNode: start_count, end_count, case_count, median/min/max_duration_before_ms
+                                   GraphEdge: case_ids, dimension_counts, dimension_durations, median/min/max_duration_ms
+                                   DimensionActivityStats, DimensionSlice, StatisticsData
   core/parser.py                   CSV parsing + validation
-  core/miner.py                    DFG construction + metrics (start_count, end_count per node)
+  core/miner.py                    DFG construction + metrics; per-edge dimension_counts + dimension_durations (avg _duration_ms per dim×value group)
   core/variants.py                 Variant extraction
   core/filters.py                  Filter application (case_id, date, activity, dimension, variant)
+  core/statistics.py               Dimensional breakdowns (compute_statistics)
   tests/                           17 passing tests
 
 frontend/src/
@@ -136,7 +139,11 @@ frontend/src/
   app/map/page.tsx                 Column mapping page
   app/explore/page.tsx             Explorer: FilterPanel, graph, DetailPanel, VariantsTable
                                    graphWithSynthetic useMemo (synthetic Start/End nodes + edges)
-                                   NodeFlowChart (SVG donut), NodeDetail incoming/outgoing charts
+                                   dimensionColors useMemo (stable color map: dim → value → hex)
+                                   FLOW_COLORS + PINNED_COLORS at module scope
+                                   NodeFlowChart (SVG donut + 2-col Share/Avg-time legend table)
+                                   NodeDetail incoming/outgoing charts
+                                   EdgeDetail: dimension pies + breakdown tables, inline case IDs
   components/graph/ProcessGraph.tsx  Cytoscape graph — edge curvature drag, dynamic stylesheet, happy path,
                                    loop edges, dark mode, synthetic-node/synthetic-edge styles,
                                    effectiveCount = max(inflow, outflow)
@@ -318,9 +325,73 @@ graph.nodes.map(n => n.id).sort().join("|") + "|" + activityOrder.join(",")
 
 ---
 
+### Step 24 — Statistics & Insights module ✅ (branch BIBKPLY-2168)
+
+**Backend:**
+- `GraphNode` gains `case_count: int` (unique cases through the activity), plus `median/min/max_duration_before_ms`
+- `GraphEdge` gains `median/min/max_duration_ms`
+- New Pydantic models: `DimensionActivityStats`, `DimensionSlice`, `StatisticsData`
+- `ProcessResponse` gains `statistics: StatisticsData`
+- `backend/core/miner.py` — computes `case_counts_by_activity` via `.groupby().nunique()`; computes distribution stats (avg/median/min/max) from raw `df_shifted` rows (not from already-aggregated edge-level averages); edge distribution stats via pandas `.agg()` on edge groups
+- `backend/core/statistics.py` (new) — `compute_statistics(df, available_dimensions)` computes dimensional breakdowns: for each dimension (resource/team/region/status) × each value, filters matching cases, computes per-activity case counts and avg wait-before times using a pre-built `df_pairs` shared across all values (efficient single-pass approach); limits to 20 slices per dimension to keep response size bounded
+- `backend/api/routes/process.py` — calls `compute_statistics` after the graph is built; wrapped in try/except so a stats failure returns an empty `StatisticsData` rather than breaking the graph response
+
+**Frontend:**
+- `lib/types.ts` — `GraphNode` and `GraphEdge` extended with new fields; `DimensionActivityStats`, `DimensionSlice`, `StatisticsData` added; `ProcessResponse.statistics: StatisticsData`
+- `components/stats/StatisticsView.tsx` (new) — receives `data: ProcessResponse, isDark: boolean`; four sections:
+  1. **Top metric cards** — Total Cases, Activities, Avg Case Length, % reaching most-frequent end
+  2. **Activity Reach & Dropout** — horizontal bar chart per activity ordered by `avg_position`; bar width = `case_count / total_cases`; coloured amber/red by exit rate; exit % indicator
+  3. **Activity Time Analysis** — table: Activity | Cases | % of Total | Exit % | Avg/Median/Min/Max wait
+  4. **Step Conversion Rates** — table per edge: Transition | Count | Conversion % (green/amber/red coded) | Avg/Median/Min/Max time
+  5. **Dimensional Breakdown** — dimension selector buttons; comparison table with "All" column plus one column per segment value; shows `pct_of_segment%` + case count per cell; limited to 8 visible segment columns
+- `app/explore/page.tsx` — `activeView: "map" | "stats"` state; tab switcher (pill buttons) in header after summary chips (only shown when data loaded); graph div uses `display: activeView === "map" ? "flex" : "none"` (never unmounts, preserves curvature state); `StatisticsView` conditionally rendered alongside; detail panel + its resize handle only rendered in map mode; synthetic `GraphNode`/`GraphEdge` literals updated with new fields (`case_count: 0`, `median/min/max_duration: null`)
+
+### Step 25 — NodeFlowChart 2-column legend table ✅ (branch BIBKPLY-2168)
+- `NodeFlowChart` legend (the list beside the donut) replaced by a 2-column table: **Share %** + **Avg time**
+- Column headers ("Share" / "Avg time") added above the rows as tiny uppercase labels; color-dot + label row unchanged
+- `allItems` carries `duration: number | null` extracted from `e.avg_duration_ms` for edge-derived items; `null` renders as "—"
+- `extraItems` type updated: `duration?: number | null` added so callers can supply durations for non-edge slices
+- The previous separate "incoming/outgoing activity" list blocks at the bottom of `NodeDetail` removed (same numbers were already visible beside the pie charts)
+
+### Step 26 — Filter panel UX improvements ✅ (branch BIBKPLY-2168)
+- `FilterSection` initial state changed from `useState(true)` → `useState(false)` — all filter sections now start collapsed
+- Filter subsection order changed: **Min Edge Frequency** moved to first position (most commonly used filter), followed by Case IDs, Date Range, Activities, Variants, then dimension filters
+- Time analysis rows at the bottom of `EdgeDetail` (redundant after avg time moved into the pie legend) removed
+
+### Step 27 — Edge detail enhancements ✅ (branch BIBKPLY-2168)
+- Detail panel default width widened: `useState(288)` → `useState(320)`
+- `EdgeDetail` gains per-dimension pie charts:
+  - `GraphEdge.dimension_counts: dict[str, dict[str, int]]` (backend) / `Record<string, Record<string, number>>` (frontend) — computed in `miner.py` by grouping `df_shifted` on `(activity_name, _next_activity, dim)` and calling `.nunique()` on `case_id`
+  - One `NodeFlowChart` per dimension key rendered below the case-ID block in `EdgeDetail`; dimension values sorted descending by count become `extraItems`
+- Pie-chart legends styled into proper tables with column names ("Share" / "Avg time") and row separators (`rounded-lg border overflow-hidden` wrapper with `bg-gray-50` header row)
+
+### Step 28 — Consistent dimension colors + avg-time from backend + inline case IDs + breakdown tables ✅ (branch BIBKPLY-2168)
+
+**Consistent dimension colors:**
+- `FLOW_COLORS` and `PINNED_COLORS` constants moved from below the component tree to module scope (before `ExplorePage`) so they are accessible in `useMemo` hooks inside `ExplorePage`
+- `dimensionColors: Record<string, Record<string, string>>` useMemo in `ExplorePage` — assigns one stable color per dimension value, sorted alphabetically so the mapping is deterministic regardless of which edge is inspected first; uses `FLOW_COLORS` cycling modulo 8
+- Threaded via `DetailPanel` (new `dimensionColors?` prop) → `EdgeDetail` (new `dimensionColors?` prop)
+- `EdgeDetail` dimension pies now use `dimensionColors[dim][val]` instead of resetting a per-edge palette counter, ensuring "EMEA" is always the same blue on every edge
+
+**Avg time per dimension slice (backend):**
+- `GraphEdge` schema (`backend/api/schemas/process.py`) gains `dimension_durations: dict[str, dict[str, float | None]] = {}`
+- Frontend `GraphEdge` type (`lib/types.ts`) gains `dimension_durations: Record<string, Record<string, number | null>>`
+- `miner.py` dimension loop extended: alongside the existing `.nunique()` for counts, now also calls `.mean()` on `_duration_ms` per `(src, tgt, dim, val)` group, storing results in a parallel `edge_dim_durations` lookup; both lookups share the same filtered `df_dim` slice
+- Synthetic edges in `graphWithSynthetic` updated with `dimension_durations: {}`
+- `EdgeDetail` passes `duration: edge.dimension_durations?.[dim]?.[val] ?? null` in each `extraItem`, so the pie legend "Avg time" column shows real filtered durations instead of "—"
+
+**Case IDs inline display:**
+- The 5-sample case IDs changed from a per-row list (`<div>` per ID with border-top) to a single inline line: `{sampleIds.join(", ")}{caseIds.length > 5 ? " +N more" : ""}`; uses `break-all` for long IDs
+
+**Per-dimension breakdown table:**
+- Below each dimension pie chart in `EdgeDetail`, a compact styled table (Value | Count | Share | Avg time) shows the same data in explicit numeric form
+- Table uses `rounded-lg border` container with `bg-gray-50 dark:bg-gray-700/40` header row and `tabular-nums` column alignment; color dot in the Value column matches the pie slice
+
+---
+
 ## Possible next steps
 
-- Add backend tests for `filters.py` (currently only miner/parser/variants are tested)
+- Add backend tests for `filters.py` and `statistics.py`
 - Persist `sessionId` + `columnMapping` in `localStorage` so page refresh doesn't lose state
 - Add a `generate_sample_data.py` script to produce synthetic event logs of configurable size
 - Deploy: add Caddy/Nginx reverse proxy to `docker-compose.yml` for a one-command VPS deploy

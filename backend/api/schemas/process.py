@@ -33,9 +33,13 @@ class GraphNode(BaseModel):
     id: str
     label: str
     count: int
+    case_count: int = 0
     start_count: int = 0
     end_count: int = 0
     avg_duration_before_ms: float | None = None
+    median_duration_before_ms: float | None = None
+    min_duration_before_ms: float | None = None
+    max_duration_before_ms: float | None = None
     avg_position: float
     is_start: bool
     is_end: bool
@@ -47,8 +51,12 @@ class GraphEdge(BaseModel):
     target: str
     count: int
     avg_duration_ms: float | None = None
+    median_duration_ms: float | None = None
+    min_duration_ms: float | None = None
+    max_duration_ms: float | None = None
     frequency_ratio: float
     case_ids: list[str] = []
+    dimension_counts: dict[str, dict[str, int]] = {}
 
 
 class ProcessGraph(BaseModel):
@@ -74,9 +82,30 @@ class SummaryMetrics(BaseModel):
     date_max: str
 
 
+# ── Statistics ─────────────────────────────────────────────────────────────────
+
+class DimensionActivityStats(BaseModel):
+    activity: str
+    case_count: int
+    pct_of_segment: float
+    avg_duration_before_ms: float | None = None
+
+
+class DimensionSlice(BaseModel):
+    dimension: str
+    value: str
+    total_cases: int
+    activities: list[DimensionActivityStats]
+
+
+class StatisticsData(BaseModel):
+    dimensional_breakdowns: list[DimensionSlice]
+
+
 class ProcessResponse(BaseModel):
     graph: ProcessGraph
     variants: list[ProcessVariant]
     summary: SummaryMetrics
     available_activities: list[str]
     available_dimensions: dict[str, list[str]]
+    statistics: StatisticsData

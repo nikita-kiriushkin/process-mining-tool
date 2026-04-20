@@ -1,11 +1,12 @@
 from fastapi import APIRouter, HTTPException
 
-from api.schemas.process import ProcessRequest, ProcessResponse, ProcessGraph
+from api.schemas.process import ProcessRequest, ProcessResponse, ProcessGraph, StatisticsData
 from api.routes.upload import get_session_path
 from core.parser import parse_event_log
 from core.miner import build_process_graph
 from core.variants import extract_variants
 from core.filters import apply_filters
+from core.statistics import compute_statistics
 
 router = APIRouter()
 
@@ -31,6 +32,13 @@ def process_event_log(request: ProcessRequest):
         graph_result = build_process_graph(df)
         variants_result = extract_variants(df)
 
+        # Statistics are isolated from miner errors so a stats failure never
+        # breaks the graph response.
+        try:
+            statistics = compute_statistics(df, graph_result["available_dimensions"])
+        except Exception:
+            statistics = StatisticsData(dimensional_breakdowns=[])
+
         # Apply min_edge_frequency: remove edges below the threshold post-construction
         graph = graph_result["graph"]
         min_freq = request.filters.min_edge_frequency
@@ -46,6 +54,7 @@ def process_event_log(request: ProcessRequest):
             summary=graph_result["summary"],
             available_activities=graph_result["available_activities"],
             available_dimensions=graph_result["available_dimensions"],
+            statistics=statistics,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
