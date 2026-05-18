@@ -36,14 +36,14 @@ function buildStylesheet(isDark: boolean, showSynthetic: boolean): any[] {
         "border-color": nodeBorder,
         shape: "round-rectangle",
         width: "data(nodeWidth)",
-        height: 54,
-        padding: "8px",
+        height: 86,
+        padding: "13px",
         label: "data(label)",
         "text-valign": "center",
         "text-halign": "center",
         "text-wrap": "wrap",
         "text-max-width": "data(textMaxWidth)",
-        "font-size": "11px",
+        "font-size": "18px",
         "font-weight": "500",
         "font-family": "Inter, -apple-system, sans-serif",
         color: nodeText,
@@ -94,7 +94,7 @@ function buildStylesheet(isDark: boolean, showSynthetic: boolean): any[] {
         "control-point-weights": 0.5,
         width: "data(lineWidth)",
         label: "data(label)",
-        "font-size": "10px",
+        "font-size": "16px",
         "text-rotation": "autorotate",
         color: edgeText,
         "text-background-color": edgeTextBg,
@@ -237,7 +237,7 @@ function buildElements(
 
   const nodes: ElementDefinition[] = graph.nodes.map((node) => {
     const effectiveCount = Math.max(inflow[node.id] ?? 0, outflow[node.id] ?? 0);
-    const nodeWidth = Math.max(80, Math.min(170, node.label.length * 8 + 32));
+    const nodeWidth = Math.max(140, Math.min(280, node.label.length * 13 + 50));
     const isSynthetic = node.id.startsWith(SYNTHETIC_PREFIX);
     const cls = isSynthetic
       ? "synthetic-node"
@@ -259,7 +259,7 @@ function buildElements(
         is_start: node.is_start,
         is_end: node.is_end,
         nodeWidth,
-        textMaxWidth: `${nodeWidth - 12}px`,
+        textMaxWidth: `${nodeWidth - 20}px`,
       },
       classes: cls,
       position: nodePositions[node.id] ?? { x: 0, y: 0 },
@@ -269,7 +269,7 @@ function buildElements(
   const edges: ElementDefinition[] = graph.edges.map((edge) => {
     const isSyntheticEdge = isSyntheticEdgeFn(edge);
     const relFreq = isSyntheticEdge ? 0 : edge.count / maxEdgeCount;
-    const lineWidth = 1.5 + relFreq * 7;
+    const lineWidth = 2.5 + relFreq * 11.5;
     const classes = [
       isSyntheticEdge && "synthetic-edge",
       loopEdgeIds.has(edge.id) && "loop-edge",
@@ -383,7 +383,6 @@ export function ProcessGraph({
       cy.edges().removeStyle("curve-style control-point-distances");
     });
     edgeCurvaturesRef.current = {};
-    cy.fit(undefined, 50);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetLayoutKey]);
 

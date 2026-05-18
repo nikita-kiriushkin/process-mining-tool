@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
@@ -15,7 +15,7 @@ interface ColumnMapperProps {
 }
 
 const REQUIRED_FIELDS: Array<{
-  key: keyof ColumnMapping;
+  key: "case_id" | "activity_name" | "timestamp";
   label: string;
   hint: string;
 }> = [
@@ -24,25 +24,32 @@ const REQUIRED_FIELDS: Array<{
   { key: "timestamp", label: "Timestamp", hint: "When the event occurred" },
 ];
 
-const OPTIONAL_FIELDS: Array<{
-  key: keyof ColumnMapping;
-  label: string;
-  hint: string;
-}> = [
-  { key: "resource", label: "Resource", hint: "Person or system executing the step" },
-  { key: "team", label: "Team", hint: "Team dimension for filtering" },
-  { key: "region", label: "Region", hint: "Geographic dimension for filtering" },
-  { key: "status", label: "Status", hint: "Status / stage dimension" },
-  { key: "cost", label: "Cost", hint: "Numeric cost or value metric" },
-];
+/** snake_case / camelCase / kebab-case → Title Case */
+function toTitle(s: string): string {
+  return s
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
 
+type RequiredMapping = Pick<ColumnMapping, "case_id" | "activity_name" | "timestamp">;
+type DimRow = { label: string; column: string };
 
-function autoDetect(columns: string[]): Partial<ColumnMapping> {
+function autoDetectRequired(columns: string[]): Partial<RequiredMapping> {
   return {
     case_id: columns[0],
     activity_name: columns[1],
     timestamp: columns[2],
   };
+}
+
+function buildDefaultDimRows(columns: string[], requiredCols: string[]): DimRow[] {
+  const reqSet = new Set(requiredCols.filter(Boolean));
+  return columns
+    .filter((c) => !reqSet.has(c))
+    .map((c) => ({ label: toTitle(c), column: c }));
 }
 
 export function ColumnMapper({
@@ -54,29 +61,44 @@ export function ColumnMapper({
 }: ColumnMapperProps) {
   const { columns, sample_rows, row_count } = uploadResponse;
 
-  const [mapping, setMapping] = useState<Partial<ColumnMapping>>(
-    initialMapping ?? autoDetect(columns)
+  const [reqMapping, setReqMapping] = useState<Partial<RequiredMapping>>(
+    initialMapping
+      ? { case_id: initialMapping.case_id, activity_name: initialMapping.activity_name, timestamp: initialMapping.timestamp }
+      : autoDetectRequired(columns)
   );
-  const [errors, setErrors] = useState<Partial<Record<keyof ColumnMapping, string>>>({});
+
+  const [dimRows, setDimRows] = useState<DimRow[]>(() => {
+    if (initialMapping?.dimensions && Object.keys(initialMapping.dimensions).length > 0) {
+      return Object.entries(initialMapping.dimensions).map(([label, column]) => ({ label, column }));
+    }
+    const req = autoDetectRequired(columns);
+    return buildDefaultDimRows(columns, [req.case_id ?? "", req.activity_name ?? "", req.timestamp ?? ""]);
+  });
+
+  const [errors, setErrors] = useState<Partial<Record<"case_id" | "activity_name" | "timestamp", string>>>({});
 
   // Re-run auto-detect when columns change (fresh upload)
   useEffect(() => {
     if (!initialMapping) {
-      setMapping(autoDetect(columns));
+      const req = autoDetectRequired(columns);
+      setReqMapping(req);
+      setDimRows(buildDefaultDimRows(columns, [req.case_id ?? "", req.activity_name ?? "", req.timestamp ?? ""]));
     }
   }, [columns, initialMapping]);
 
-  function setField(key: keyof ColumnMapping, value: string) {
-    setMapping((prev) => ({ ...prev, [key]: value || undefined }));
+  function setReqField(key: keyof RequiredMapping, value: string) {
+    setReqMapping((prev) => ({ ...prev, [key]: value || undefined }));
     if (value) setErrors((prev) => ({ ...prev, [key]: undefined }));
+  }
+
+  function updateDimRow(index: number, patch: Partial<DimRow>) {
+    setDimRows((rows) => rows.map((r, i) => (i === index ? { ...r, ...patch } : r)));
   }
 
   function validate(): boolean {
     const newErrors: typeof errors = {};
     for (const { key, label } of REQUIRED_FIELDS) {
-      if (!mapping[key]) {
-        newErrors[key] = `${label} is required`;
-      }
+      if (!reqMapping[key]) newErrors[key] = `${label} is required`;
     }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -84,10 +106,27 @@ export function ColumnMapper({
 
   function handleSubmit() {
     if (!validate()) return;
-    onSubmit(mapping as ColumnMapping);
+    const dimensions: Record<string, string> = {};
+    for (const { label, column } of dimRows) {
+      const trimmed = label.trim();
+      if (trimmed && column) dimensions[trimmed] = column;
+    }
+    onSubmit({
+      case_id: reqMapping.case_id!,
+      activity_name: reqMapping.activity_name!,
+      timestamp: reqMapping.timestamp!,
+      dimensions,
+    });
   }
 
-  const selectedCols = new Set(Object.values(mapping).filter(Boolean));
+  const selectedCols = useMemo(() => {
+    const s = new Set<string>();
+    if (reqMapping.case_id) s.add(reqMapping.case_id);
+    if (reqMapping.activity_name) s.add(reqMapping.activity_name);
+    if (reqMapping.timestamp) s.add(reqMapping.timestamp);
+    for (const { column } of dimRows) if (column) s.add(column);
+    return s;
+  }, [reqMapping, dimRows]);
 
   return (
     <div className="space-y-6">
@@ -102,19 +141,19 @@ export function ColumnMapper({
               key={key}
               label={label}
               hint={hint}
-              value={mapping[key] ?? ""}
+              value={reqMapping[key] ?? ""}
               columns={columns}
               error={errors[key]}
               required
               selectedCols={selectedCols}
-              currentKey={key}
-              onChange={(v) => setField(key, v)}
+              currentCol={reqMapping[key] ?? ""}
+              onChange={(v) => setReqField(key, v)}
             />
           ))}
         </div>
       </div>
 
-      {/* Optional fields */}
+      {/* Optional dimension fields */}
       <div>
         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
           Optional columns
@@ -123,16 +162,15 @@ export function ColumnMapper({
           </span>
         </p>
         <div className="space-y-3">
-          {OPTIONAL_FIELDS.map(({ key, label, hint }) => (
-            <FieldRow
-              key={key}
-              label={label}
-              hint={hint}
-              value={mapping[key] ?? ""}
+          {dimRows.map((row, i) => (
+            <DimensionRow
+              key={i}
+              label={row.label}
+              column={row.column}
               columns={columns}
               selectedCols={selectedCols}
-              currentKey={key}
-              onChange={(v) => setField(key, v)}
+              onLabelChange={(label) => updateDimRow(i, { label })}
+              onColumnChange={(column) => updateDimRow(i, { column })}
             />
           ))}
         </div>
@@ -188,7 +226,7 @@ export function ColumnMapper({
       </div>
 
       {/* Error summary */}
-      {Object.keys(errors).some((k) => errors[k as keyof ColumnMapping]) && (
+      {Object.values(errors).some(Boolean) && (
         <div className="flex items-center gap-2 p-3 bg-red-50 rounded-lg text-sm text-red-700">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
           Please map all required columns before continuing.
@@ -208,7 +246,7 @@ export function ColumnMapper({
   );
 }
 
-// ── Sub-component ──────────────────────────────────────────────────────────
+// ── Sub-components ──────────────────────────────────────────────────────────
 
 interface FieldRowProps {
   label: string;
@@ -218,20 +256,11 @@ interface FieldRowProps {
   error?: string;
   required?: boolean;
   selectedCols: Set<string>;
-  currentKey: keyof ColumnMapping;
+  currentCol: string;
   onChange: (value: string) => void;
 }
 
-function FieldRow({
-  label,
-  hint,
-  value,
-  columns,
-  error,
-  required,
-  selectedCols,
-  onChange,
-}: FieldRowProps) {
+function FieldRow({ label, hint, value, columns, error, required, selectedCols, currentCol, onChange }: FieldRowProps) {
   return (
     <div className="flex items-start gap-4">
       <div className="w-36 pt-2 flex-shrink-0">
@@ -247,26 +276,74 @@ function FieldRow({
           onChange={(e) => onChange(e.target.value)}
           className={cn(
             "w-full px-3 py-2 text-sm rounded-lg border bg-white",
-            "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500",
-            "transition-colors",
-            error
-              ? "border-red-300 bg-red-50"
-              : "border-gray-200 hover:border-gray-300"
+            "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors",
+            error ? "border-red-300 bg-red-50" : "border-gray-200 hover:border-gray-300"
           )}
         >
           {!required && <option value="">— not mapped —</option>}
           {required && !value && <option value="">Select column…</option>}
           {columns.map((col) => {
-            const isTaken = selectedCols.has(col) && col !== value;
+            const isTaken = selectedCols.has(col) && col !== currentCol;
             return (
               <option key={col} value={col} disabled={isTaken}>
-                {col}
-                {isTaken ? " (already used)" : ""}
+                {col}{isTaken ? " (already used)" : ""}
               </option>
             );
           })}
         </select>
         {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+      </div>
+    </div>
+  );
+}
+
+interface DimensionRowProps {
+  label: string;
+  column: string;
+  columns: string[];
+  selectedCols: Set<string>;
+  onLabelChange: (label: string) => void;
+  onColumnChange: (column: string) => void;
+}
+
+function DimensionRow({ label, column, columns, selectedCols, onLabelChange, onColumnChange }: DimensionRowProps) {
+  return (
+    <div className="flex items-start gap-4">
+      <div className="w-36 flex-shrink-0 pt-2">
+        <input
+          type="text"
+          value={label}
+          onChange={(e) => onLabelChange(e.target.value)}
+          placeholder="Dimension name"
+          className={cn(
+            "w-full text-sm font-medium text-gray-700 bg-transparent",
+            "border-b border-dashed border-gray-300 pb-0.5",
+            "focus:outline-none focus:border-blue-400",
+            "placeholder:text-gray-300"
+          )}
+        />
+        <p className="text-xs text-gray-400 mt-0.5 leading-tight">Click to rename</p>
+      </div>
+      <div className="flex-1">
+        <select
+          value={column}
+          onChange={(e) => onColumnChange(e.target.value)}
+          className={cn(
+            "w-full px-3 py-2 text-sm rounded-lg border bg-white",
+            "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors",
+            "border-gray-200 hover:border-gray-300"
+          )}
+        >
+          <option value="">— not mapped —</option>
+          {columns.map((col) => {
+            const isTaken = selectedCols.has(col) && col !== column;
+            return (
+              <option key={col} value={col} disabled={isTaken}>
+                {col}{isTaken ? " (already used)" : ""}
+              </option>
+            );
+          })}
+        </select>
       </div>
     </div>
   );

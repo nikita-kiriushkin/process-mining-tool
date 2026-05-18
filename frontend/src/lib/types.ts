@@ -4,11 +4,9 @@ export interface ColumnMapping {
   case_id: string;
   activity_name: string;
   timestamp: string;
-  resource?: string;
-  team?: string;
-  region?: string;
-  status?: string;
-  cost?: string;
+  // key = display label (used as dimension name throughout the app)
+  // value = source CSV column name
+  dimensions: Record<string, string>;
 }
 
 // ── Upload ────────────────────────────────────────────────────────────────────

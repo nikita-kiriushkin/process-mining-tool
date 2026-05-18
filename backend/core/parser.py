@@ -49,14 +49,8 @@ def parse_event_log(file_path: str, mapping: ColumnMapping) -> pd.DataFrame:
         + any optional mapped columns kept under their canonical names
     """
     required_source_cols = [mapping.case_id, mapping.activity_name, mapping.timestamp]
-    optional_map: dict[str, str | None] = {
-        "resource": mapping.resource,
-        "team": mapping.team,
-        "region": mapping.region,
-        "status": mapping.status,
-        "cost": mapping.cost,
-    }
-    optional_source_cols = [v for v in optional_map.values() if v]
+    # dimensions: {label → source_col}; deduplicate source cols preserving order
+    optional_source_cols = list(dict.fromkeys(v for v in mapping.dimensions.values() if v))
 
     use_cols = list(dict.fromkeys(required_source_cols + optional_source_cols))
 
@@ -65,15 +59,15 @@ def parse_event_log(file_path: str, mapping: ColumnMapping) -> pd.DataFrame:
     except ValueError as e:
         raise ValueError(f"Column selection error: {e}")
 
-    # Rename to canonical names
+    # Rename source columns to canonical / display names
     rename = {
         mapping.case_id: "case_id",
         mapping.activity_name: "activity_name",
         mapping.timestamp: "timestamp",
     }
-    for canonical, source in optional_map.items():
-        if source and source not in rename:
-            rename[source] = canonical
+    for label, source_col in mapping.dimensions.items():
+        if source_col and source_col not in rename:
+            rename[source_col] = label
 
     df = df.rename(columns=rename)
 
