@@ -5,11 +5,9 @@ class ColumnMapping(BaseModel):
     case_id: str
     activity_name: str
     timestamp: str
-    resource: str | None = None
-    team: str | None = None
-    region: str | None = None
-    status: str | None = None
-    cost: str | None = None
+    # key = display label used as the internal DataFrame column name
+    # value = source CSV column name
+    dimensions: dict[str, str] = {}
 
 
 class ProcessFilters(BaseModel):
@@ -57,6 +55,7 @@ class GraphEdge(BaseModel):
     frequency_ratio: float
     case_ids: list[str] = []
     dimension_counts: dict[str, dict[str, int]] = {}
+    dimension_durations: dict[str, dict[str, float | None]] = {}
 
 
 class ProcessGraph(BaseModel):

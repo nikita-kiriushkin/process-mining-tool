@@ -43,10 +43,7 @@ def compute_statistics(
     """
     breakdowns: list[DimensionSlice] = []
 
-    dim_cols = [
-        c for c in ("resource", "team", "region", "status")
-        if c in df.columns and c in available_dimensions
-    ]
+    dim_cols = [c for c in available_dimensions.keys() if c in df.columns]
 
     if not dim_cols:
         return StatisticsData(dimensional_breakdowns=[])

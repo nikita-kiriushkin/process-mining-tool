@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
 import { Loader2, AlertCircle, ArrowLeft, RefreshCw, Moon, Sun, ChevronDown, GripVertical } from "lucide-react";
 import { processEventLog } from "@/lib/api";
@@ -58,6 +58,7 @@ export default function ExplorePage() {
     queryFn: () => processEventLog(sessionId!, columnMapping as ColumnMapping, filters),
     enabled: !!sessionId && !!columnMapping.case_id,
     staleTime: Infinity,
+    placeholderData: keepPreviousData,
   });
 
   useEffect(() => {
@@ -71,7 +72,7 @@ export default function ExplorePage() {
   const [darkMode, setDarkMode] = useState(false);
 
   // Display options (frontend-only, not sent to backend)
-  const [showSynthetic, setShowSynthetic] = useState(true);
+  const [showSynthetic, setShowSynthetic] = useState(false);
 
   // Layout reset counter — incrementing triggers ProcessGraph to re-run preset layout
   const [resetLayoutKey, setResetLayoutKey] = useState(0);
@@ -101,7 +102,7 @@ export default function ExplorePage() {
 
   // Resizable panel sizes (px)
   const [filterWidth, setFilterWidth] = useState(256);
-  const [detailWidth, setDetailWidth] = useState(320);
+  const [detailWidth, setDetailWidth] = useState(380);
   const [variantsHeight, setVariantsHeight] = useState(192);
   useEffect(() => {
     document.documentElement.classList.toggle("dark", darkMode);
@@ -311,7 +312,12 @@ export default function ExplorePage() {
 
               {/* Statistics view */}
               {activeView === "stats" && (
-                <StatisticsView data={data} isDark={darkMode} />
+                <StatisticsView
+                  data={data}
+                  isDark={darkMode}
+                  activityOrder={activityOrder}
+                  excludedActivities={filters.exclude_activities}
+                />
               )}
             </>
           )}
@@ -385,6 +391,24 @@ function FilterPanel({ data, filters, setFilters, resetFilters, showSynthetic, o
   const [excluded, setExcluded] = useState<Set<string>>(
     () => new Set(filters.exclude_activities ?? [])
   );
+
+  // Stable activity list: available activities + any currently-excluded ones that
+  // vanished from the response (because the backend re-runs without them).
+  // Order follows activityOrder so the list stays consistent with the Activity Order section.
+  const allActivities = useMemo(() => {
+    const result = [...data.available_activities];
+    for (const act of excluded) {
+      if (!data.available_activities.includes(act)) result.push(act);
+    }
+    return result.sort((a, b) => {
+      const ai = activityOrder.indexOf(a);
+      const bi = activityOrder.indexOf(b);
+      if (ai === -1 && bi === -1) return 0;
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
+  }, [data.available_activities, excluded, activityOrder]);
 
   // Min edge frequency slider — commit on mouse-up to avoid rapid re-fetches
   const maxEdge = useMemo(
@@ -611,9 +635,9 @@ function FilterPanel({ data, filters, setFilters, resetFilters, showSynthetic, o
         </FilterSection>
 
         {/* ── Activities ── */}
-        <FilterSection title={`Activities (${data.available_activities.length})`}>
-          <div className="space-y-0.5 max-h-44 overflow-y-auto pr-0.5">
-            {data.available_activities.map((act) => (
+        <FilterSection title={`Activities (${allActivities.length})`}>
+          <div className="space-y-0.5">
+            {allActivities.map((act) => (
               <label key={act} className="flex items-start gap-2 cursor-pointer group py-1">
                 <input
                   type="checkbox"
@@ -627,9 +651,6 @@ function FilterPanel({ data, filters, setFilters, resetFilters, showSynthetic, o
               </label>
             ))}
           </div>
-          {excluded.size > 0 && (
-            <p className="text-[10px] text-amber-600 mt-1.5">{excluded.size} excluded</p>
-          )}
         </FilterSection>
 
         {/* ── Variants ── */}

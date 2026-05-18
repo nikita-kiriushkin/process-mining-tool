@@ -100,7 +100,9 @@ def build_process_graph(df: pd.DataFrame) -> dict:
     # For each dimension column present, count unique cases and compute avg
     # transition duration per (src, tgt, value).
     # df_shifted already carries the source-event's dimension columns.
-    dim_cols_present = [c for c in ("resource", "team", "region", "status") if c in df_shifted.columns]
+    _core_shifted = {"case_id", "activity_name", "timestamp", "_pos", "_case_len", "_norm_pos",
+                     "_next_activity", "_next_timestamp", "_duration_ms"}
+    dim_cols_present = [c for c in df_shifted.columns if c not in _core_shifted]
     edge_dim_lookup: dict[tuple, dict[str, dict[str, int]]] = {}
     edge_dim_durations: dict[tuple, dict[str, dict[str, float | None]]] = {}
     for dim in dim_cols_present:
@@ -197,7 +199,8 @@ def build_process_graph(df: pd.DataFrame) -> dict:
     )
 
     # ── Available dimensions ──────────────────────────────────────────────────
-    dim_cols = [c for c in ("resource", "team", "region", "status") if c in df.columns]
+    _core = {"case_id", "activity_name", "timestamp", "_pos", "_case_len", "_norm_pos"}
+    dim_cols = [c for c in df.columns if c not in _core]
     available_dimensions = {
         col: sorted(df[col].dropna().astype(str).unique().tolist()) for col in dim_cols
     }
